@@ -337,6 +337,9 @@ fn put(
     line: Line<'_>,
     bg: Option<Color>,
 ) {
+    // Blank the whole width first, so nothing drawn underneath (the hour
+    // lines) shows through after the text.
+    buf.set_string(x, y, " ".repeat(width as usize), Style::new());
     if let Some(bg) = bg {
         buf.set_style(Rect::new(x, y, width, 1), Style::new().bg(bg));
     }
@@ -500,6 +503,25 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
                 "│",
                 Style::new().fg(Color::Indexed(240)),
             );
+        }
+
+        // A faint dotted line at each full hour (behind the events, which are
+        // drawn next). Colour: one step above the background of the Stylix
+        // scheme this was tuned on. See DESIGN.md for the band variants.
+        for r in 0..grid.height {
+            let abs = offset + r as u32;
+            if abs >= total {
+                break;
+            }
+            if abs.is_multiple_of(rph) && abs > 0 {
+                let dots = "┈".repeat(cw as usize);
+                buf.set_string(
+                    x0,
+                    grid.y + r,
+                    dots,
+                    Style::new().fg(Color::Rgb(36, 45, 56)),
+                );
+            }
         }
 
         // More hours above / below.

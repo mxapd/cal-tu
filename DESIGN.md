@@ -302,3 +302,23 @@ module (`accounts.calendar` + `services.vdirsyncer`).
 6. *(done)* **Packaging:** Nix package with shell completions, overlay,
    home-manager module (`programs.cal-tui`, `services.cal-tui-notify`), all
    covered by `nix flake check`.
+
+## Later (ideas, not scheduled)
+
+- **Hour bands in the day grid.** Alternative to the dotted hour lines, as a
+  setting (e.g. `[theme] hour_style = "lines" | "shade" | "tint" | "none"`).
+  Previewed 2026-11-15 against the Stylix scheme in
+  `~/nixos/modules/home/xam/desktops/hyprmoon.nix`; the user chose lines for
+  now:
+  - *shade*: every other hour `#161c25`, a hair above `base00` (`#121820`);
+  - *tint*: every other hour `#1b222c` (`base01`), a slightly stronger step;
+  - *lines* (current): `┈` at each full hour in `#242d38` (`base02`).
+  Band colours are tuned to that scheme; a theme setting should derive them
+  from the terminal's background instead of hard-coding them. Note kitty's
+  background is 65% transparent but cells with their own background are drawn
+  opaque, so bands stand out more there than in previews.
+- **Shorter titles for feeds:** a per-calendar rule to shorten long feed
+  titles further (e.g. "Föreläsning 2DV518" from TimeEdit's comma lists).
+- **Notes in `$EDITOR`** instead of the one-line form field.
+- **"This and following"** for editing repeating events (split the series).
+- **Repeating todos**: completing one moves it to its next due date.

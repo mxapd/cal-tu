@@ -1002,6 +1002,123 @@ mod tests {
         }
     }
 
+    /// Render the screen as HTML (screen.html) with the colours of a base16
+    /// terminal theme, for previewing styling choices:
+    /// `CAL_TUI_PREVIEW_OUT=/tmp/x cargo test -p cal-tui export_previews -- --ignored`
+    /// (CAL_TUI_SCREEN_DIR picks a real calendars folder).
+    #[test]
+    #[ignore]
+    fn export_previews() {
+        use ratatui::style::{Color, Modifier};
+        let Ok(out) = std::env::var("CAL_TUI_PREVIEW_OUT") else {
+            return;
+        };
+        // The user's Stylix scheme (base00..base0F) and kitty's base16 mapping.
+        let base = [
+            "#121820", "#1b222c", "#242d38", "#2f3a47", "#9aa5b4", "#c5d0de", "#e0e6f0", "#f2f5fa",
+            "#e26d6d", "#f2a76b", "#f6d37a", "#7fcf7d", "#6fc6c9", "#7aa7ff", "#c792ea", "#f28ba8",
+        ];
+        let ansi = [
+            base[0], base[8], base[11], base[10], base[13], base[14], base[12], base[5], base[3],
+            base[8], base[11], base[10], base[13], base[14], base[12], base[7],
+        ];
+        let indexed = |n: u8| -> String {
+            match n {
+                0..=15 => ansi[n as usize].to_string(),
+                16..=231 => {
+                    let n = n - 16;
+                    let c = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
+                    format!("#{:02x}{:02x}{:02x}", c(n / 36), c((n / 6) % 6), c(n % 6))
+                }
+                _ => {
+                    let g = 8 + (n - 232) * 10;
+                    format!("#{g:02x}{g:02x}{g:02x}")
+                }
+            }
+        };
+        let css = |c: Color, default: &str| -> String {
+            match c {
+                Color::Reset => default.to_string(),
+                Color::Rgb(r, g, b) => format!("#{r:02x}{g:02x}{b:02x}"),
+                Color::Indexed(n) => indexed(n),
+                Color::Black => indexed(0),
+                Color::Red => indexed(1),
+                Color::Green => indexed(2),
+                Color::Yellow => indexed(3),
+                Color::Blue => indexed(4),
+                Color::Magenta => indexed(5),
+                Color::Cyan => indexed(6),
+                Color::Gray => indexed(7),
+                Color::DarkGray => indexed(8),
+                Color::LightRed => indexed(9),
+                Color::LightGreen => indexed(10),
+                Color::LightYellow => indexed(11),
+                Color::LightBlue => indexed(12),
+                Color::LightMagenta => indexed(13),
+                Color::LightCyan => indexed(14),
+                Color::White => indexed(15),
+            }
+        };
+        {
+            let name = "screen";
+            let mut app = match std::env::var("CAL_TUI_SCREEN_DIR") {
+                Ok(dir) => app_with(
+                    &dir,
+                    "[calendars.lnu-timeedit]\nread_only = true\nname = \"LNU\"\ncolor = \"orange\"",
+                    Path::new("/nonexistent/x.toml"),
+                ),
+                Err(_) => app(),
+            };
+            app.weather = Some(crate::weather::Weather::fixed(
+                crate::weather::tests::sample(),
+            ));
+            let mut term = Terminal::new(TestBackend::new(110, 32)).unwrap();
+            term.draw(|f| ui::draw(f, &mut app)).unwrap();
+            let buf = term.backend().buffer();
+            let mut html = String::new();
+            for y in 0..buf.area.height {
+                for x in 0..buf.area.width {
+                    let c = &buf[(x, y)];
+                    let (mut fg, mut bg) = (css(c.fg, base[5]), css(c.bg, "transparent"));
+                    if c.modifier.contains(Modifier::REVERSED) {
+                        std::mem::swap(&mut fg, &mut bg);
+                    }
+                    let mut style = format!("color:{fg};background:{bg};");
+                    if c.modifier.contains(Modifier::BOLD) {
+                        style.push_str("font-weight:700;");
+                    }
+                    if c.modifier.contains(Modifier::ITALIC) {
+                        style.push_str("font-style:italic;");
+                    }
+                    if c.modifier.contains(Modifier::UNDERLINED) {
+                        style.push_str("text-decoration:underline;");
+                    }
+                    let sym = match c.symbol() {
+                        "<" => "&lt;",
+                        ">" => "&gt;",
+                        "&" => "&amp;",
+                        s => s,
+                    };
+                    html.push_str(&format!("<span style=\"{style}\">{sym}</span>"));
+                }
+                html.push('\n');
+            }
+            std::fs::write(format!("{out}/{name}.html"), html).unwrap();
+        }
+    }
+
+    #[test]
+    fn hour_lines_do_not_show_through_events() {
+        let mut app = app();
+        let screen = render(&mut app);
+        for line in screen.lines() {
+            if line.contains("Linear Algebra") || line.contains("Lunch with Anna") {
+                assert!(!line.contains('┈'), "{line}");
+            }
+        }
+        assert!(screen.contains("┈┈┈"), "lines are drawn in free hours");
+    }
+
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`
     /// (set CAL_TUI_SCREEN_DIR to render a real calendars folder instead).
     #[test]

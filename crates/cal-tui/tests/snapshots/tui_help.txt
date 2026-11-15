@@ -3,30 +3,30 @@
       │▌ Hall A · lecture ↻  University                            │                                          
  09:00│▌                                             Help                                                     
       │▌            h / l, ← / →      previous / next day                                                     
- 10:00│             H / L             previous / next week                                                    
+ 10:00│┈┈┈┈┈┈┈┈┈┈┈  H / L             previous / next week                                                    
       │             [ / ]             previous / next month                                                   
- 11:00│             j / k, ↓ / ↑      move selection (calendar panel: week)                                   
+ 11:00│┈┈┈┈┈┈┈┈┈┈┈  j / k, ↓ / ↑      move selection (calendar panel: week)                                   
  11:32┼───────────  J / K, PgDn / PgUpscroll the day's hours (also the mouse wheel)                           
  12:00│▌ Lunch wit  Tab / Shift-Tab   next / previous panel                                                   
       │▌ Café Lisa  t                 go to today                                                             
- 13:00│             g                 go to date (2026-12-24, 12-24, 24, +7, -7)                              
+ 13:00│┈┈┈┈┈┈┈┈┈┈┈  g                 go to date (2026-12-24, 12-24, 24, +7, -7)                              
       │             Enter             show details of the selected item                                       
- 14:00│             a                 add an event (todo panel: a todo)                                       
+ 14:00│┈┈┈┈┈┈┈┈┈┈┈  a                 add an event (todo panel: a todo)                                       
       │             e                 edit the selected item                                                  
- 15:00│             d                 delete the selected item                                                
+ 15:00│┈┈┈┈┈┈┈┈┈┈┈  d                 delete the selected item                                                
       │             x, Space          todo: mark done / not done                            ──────────────────
- 16:00│             + / -             todo: raise / lower priority                                            
+ 16:00│┈┈┈┈┈┈┈┈┈┈┈  + / -             todo: raise / lower priority                                            
       │             v                 switch month / week view                                                
- 17:00│             c                 show / hide calendars                                                   
+ 17:00│┈┈┈┈┈┈┈┈┈┈┈  c                 show / hide calendars                                                   
       │             C                 show / hide completed todos                                             
- 18:00│             S                 sync (runs sync_command), then reload                                   
+ 18:00│┈┈┈┈┈┈┈┈┈┈┈  S                 sync (runs sync_command), then reload                                   
       │▌ Climbing   R                 reload from disk                                                        
  19:00│▌ ↻  person  W                 show loading warnings                                                   
       │▌            w                 layout mode: presets, resize, swap, hide panels; Ente                   
- 20:00│             q                 quit                                                                    
+ 20:00│┈┈┈┈┈┈┈┈┈┈┈  q                 quit                                                                    
       │                                                                                                       
- 21:00│             Markers           ● calendar item  ○ read-only  * repeats  > has notes                    
+ 21:00│┈┈┈┈┈┈┈┈┈┈┈  Markers           ● calendar item  ○ read-only  * repeats  > has notes                    
       │                                                                                                       
- 22:00▼                                                            │                                          
+ 22:00▼┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈│                                          
  Mon 16 Nov 2026 │ 11:32 │ ● personal ● University │ next: Lunch with Anna in 28m │ ⚠ 3 (W)                   
  Esc Close                                                                                                    
