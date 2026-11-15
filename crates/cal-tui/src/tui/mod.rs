@@ -33,6 +33,11 @@ pub fn run(config: Config, now: Option<chrono::DateTime<chrono_tz::Tz>>) -> Resu
         app.date = now.date_naive();
         app.refresh();
     }
+    app.weather = app
+        .config
+        .weather
+        .as_ref()
+        .map(|w| crate::weather::Weather::new(w, Some(crate::weather::cache_path())));
     let mouse = app.config.mouse.unwrap_or(true);
     if mouse {
         // Stop mouse reporting if we crash, or the shell gets mouse codes.
@@ -83,6 +88,9 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
             }
         }
 
+        if let Some(w) = &mut app.weather {
+            w.tick();
+        }
         if last_check.elapsed() >= CHANGE_CHECK {
             app.check_for_changes();
             last_check = Instant::now();
@@ -778,6 +786,27 @@ mod tests {
             .unwrap()
             .0;
         assert_eq!(appts.right(), r.x - 10, "divider follows the mouse");
+    }
+
+    #[test]
+    fn weather_next_to_the_date() {
+        let mut app = app();
+        // Without [weather] nothing is shown.
+        assert!(!render(&mut app).contains("now ("));
+        app.weather = Some(crate::weather::Weather::fixed(
+            crate::weather::tests::sample(),
+        ));
+        let screen = render(&mut app);
+        assert!(
+            screen.contains("Monday, November 16, 2026   ☁ cloudy, 4° now (2°–6°)"),
+            "{screen}"
+        );
+        snapshot::assert_snapshot("tui_weather", &screen);
+        press(&mut app, 'l');
+        assert!(render(&mut app).contains("Tuesday, November 17, 2026   ☂ rain 85%, 2°–5°"));
+        // Beyond the forecast: just the date.
+        press(&mut app, ']');
+        assert!(!render(&mut app).contains("°–"));
     }
 
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`

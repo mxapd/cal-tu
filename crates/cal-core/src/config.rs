@@ -24,9 +24,25 @@ pub struct Config {
     /// Per-calendar settings, keyed by folder name.
     #[serde(default)]
     pub calendars: BTreeMap<String, CalendarConfig>,
+    /// Weather in the TUI (off unless set). Fetched from Open-Meteo.
+    pub weather: Option<WeatherConfig>,
     /// TUI layouts; see `layout.rs`. Parsed by [`Config::layout`] so errors
     /// can name the exact key.
     pub layout: Option<toml::Value>,
+}
+
+/// `[weather]`: where to show the forecast for. Only this location is sent
+/// to the weather service (Open-Meteo, no account needed).
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WeatherConfig {
+    /// Place name, looked up once (e.g. "Uppsala").
+    pub location: Option<String>,
+    /// Or exact coordinates.
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    /// `celsius` (default) or `fahrenheit`.
+    pub units: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -116,6 +132,29 @@ impl Config {
             for pat in &cal.hide_matching {
                 if let Err(e) = regex::Regex::new(pat) {
                     problems.push(format!("calendars.{id}.hide_matching: '{pat}': {e}"));
+                }
+            }
+        }
+        if let Some(w) = &self.weather {
+            match (&w.location, w.latitude, w.longitude) {
+                (_, Some(lat), Some(lon)) => {
+                    if !(-90.0..=90.0).contains(&lat) || !(-180.0..=180.0).contains(&lon) {
+                        problems.push(format!(
+                            "weather: coordinates {lat}, {lon} are out of range"
+                        ));
+                    }
+                }
+                (Some(l), None, None) if !l.trim().is_empty() => {}
+                _ => problems.push(
+                    "weather: set either location = \"Place\" or both latitude and longitude"
+                        .into(),
+                ),
+            }
+            if let Some(u) = &w.units {
+                if !matches!(u.as_str(), "celsius" | "fahrenheit") {
+                    problems.push(format!(
+                        "weather.units: '{u}' must be \"celsius\" or \"fahrenheit\""
+                    ));
                 }
             }
         }

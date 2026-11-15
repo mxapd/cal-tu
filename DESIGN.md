@@ -20,8 +20,10 @@ iCalendar files (vdir) and synced to CalDAV through vdirsyncer.
 
 ## Non-goals
 
-- **No networking in the app.** Sync is vdirsyncer's job, both two-way sync
-  with Radicale and read-only `http` subscriptions.
+- **No networking in the app** for calendar data. Sync is vdirsyncer's job, both
+  two-way sync with Radicale and read-only `http` subscriptions. The one
+  exception is the opt-in weather forecast (`[weather]`, Open-Meteo), fetched
+  on a background thread and cached; the app works the same without it.
 - **No import from calcurse.** Everything starts fresh.
 - **No custom file format.** Data is standard `.ics` files only.
 

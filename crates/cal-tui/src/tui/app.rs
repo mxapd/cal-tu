@@ -123,6 +123,8 @@ pub struct App {
     pub shown_panels: Vec<PanelKind>,
     /// Clickable regions of the last drawn frame (later entries win).
     pub hits: Vec<(Rect, Hit)>,
+    /// Weather forecast, if `[weather]` is configured.
+    pub weather: Option<crate::weather::Weather>,
     /// Divider being dragged with the mouse.
     dragging: Option<(PanelKind, Dir)>,
     /// Fixed "now" for tests.
@@ -182,6 +184,7 @@ impl App {
             shown_panels: Vec::new(),
             hits: Vec::new(),
             dragging: None,
+            weather: None,
             now_override: None,
             day_items: Vec::new(),
             upcoming: Vec::new(),

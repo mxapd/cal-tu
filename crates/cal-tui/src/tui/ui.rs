@@ -273,10 +273,20 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
 
     let focused = app.focus == PanelKind::Appointments;
     let home = app.store.home;
-    let mut lines: Vec<Line> = vec![
-        Line::from(app.date.format(" %A, %B %-d, %Y").to_string()).bold(),
-        Line::from(""),
-    ];
+    let mut date_line = vec![Span::raw(app.date.format(" %A, %B %-d, %Y").to_string()).bold()];
+    if let Some(w) = &app.weather {
+        let text = match &w.forecast {
+            Some(f) => f.line(app.date, app.today()),
+            None if w.error.is_some() && app.date == app.today() => {
+                Some("weather unavailable".to_string())
+            }
+            None => None,
+        };
+        if let Some(t) = text {
+            date_line.push(Span::raw(format!("   {t}")).fg(Color::Indexed(248)));
+        }
+    }
+    let mut lines: Vec<Line> = vec![Line::from(date_line), Line::from("")];
     let mut sel_rows = None;
     let mut item_rows = Vec::new();
 

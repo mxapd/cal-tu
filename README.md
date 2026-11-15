@@ -60,6 +60,21 @@ children = [
 ]
 ```
 
+## Weather
+
+Optional: the forecast next to the date in the appointments panel (today with
+the current temperature, and up to 16 days ahead):
+
+```toml
+[weather]
+location = "Stockholm"          # or latitude = 59.33, longitude = 18.07
+# units = "fahrenheit"
+```
+
+Data comes from [Open-Meteo](https://open-meteo.com) (free, no account); only the
+location is sent. It refreshes hourly in the background and is cached in
+`~/.cache/cal-tui/`, so it also shows offline.
+
 ## Reminders
 
 `cal-tui notify` runs in the background and shows a desktop notification for

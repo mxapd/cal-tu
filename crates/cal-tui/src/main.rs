@@ -2,6 +2,7 @@ mod fmt;
 mod notify;
 mod output;
 mod tui;
+mod weather;
 
 use std::io::IsTerminal;
 use std::path::PathBuf;
