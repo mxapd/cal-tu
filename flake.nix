@@ -18,6 +18,10 @@
     {
       homeManagerModules.default = hmModule;
       homeModules.default = hmModule;
+      # `pkgs.cal-tui` for your own nixpkgs: overlays = [ cal-tui.overlays.default ];
+      overlays.default = final: _prev: {
+        cal-tui = self.packages.${final.stdenv.hostPlatform.system}.default;
+      };
     }
     // flake-utils.lib.eachDefaultSystem (system:
       let
@@ -27,6 +31,13 @@
           version = "0.1.0";
           src = pkgs.lib.cleanSource ./.;
           cargoLock.lockFile = ./Cargo.lock;
+          nativeBuildInputs = [ pkgs.installShellFiles ];
+          postInstall = pkgs.lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
+            installShellCompletion --cmd cal-tui \
+              --bash <($out/bin/cal-tui completions bash) \
+              --zsh <($out/bin/cal-tui completions zsh) \
+              --fish <($out/bin/cal-tui completions fish)
+          '';
           # `cargo test` (unit, fixture, CLI and screen snapshot tests) runs
           # in the check phase, so a failing test fails the build.
           meta = {
@@ -64,6 +75,15 @@
         checks = {
           # Builds and runs the whole test suite.
           package = cal-tui;
+
+          # Completions are installed with the package.
+          completions = pkgs.runCommand "cal-tui-completions" { } ''
+            test -s ${cal-tui}/share/zsh/site-functions/_cal-tui
+            grep -q notify ${cal-tui}/share/zsh/site-functions/_cal-tui
+            test -s ${cal-tui}/share/bash-completion/completions/cal-tui.bash
+            test -s ${cal-tui}/share/fish/vendor_completions.d/cal-tui.fish
+            touch $out
+          '';
 
           clippy = cal-tui.overrideAttrs (old: {
             pname = "cal-tui-clippy";

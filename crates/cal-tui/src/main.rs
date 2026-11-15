@@ -130,6 +130,8 @@ enum Command {
     },
     /// Check the config file for mistakes and exit (non-zero if any).
     CheckConfig,
+    /// Print a shell completion script: `cal-tui completions zsh`.
+    Completions { shell: clap_complete::Shell },
 }
 
 #[derive(Subcommand)]
@@ -231,6 +233,16 @@ fn check_config(config: &Config) -> Vec<String> {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    if let Some(Command::Completions { shell }) = cli.command {
+        use clap::CommandFactory;
+        clap_complete::generate(
+            shell,
+            &mut Cli::command(),
+            "cal-tui",
+            &mut std::io::stdout(),
+        );
+        return Ok(());
+    }
     let config_path = cli.config.clone().unwrap_or_else(Config::default_path);
     let mut config = Config::load(&config_path)?;
     if let Some(dir) = &cli.calendars_dir {
@@ -425,7 +437,9 @@ fn main() -> Result<()> {
                 println!("Not done: {}", t.summary);
             }
         },
-        Command::Notify { .. } | Command::CheckConfig => unreachable!(),
+        Command::Notify { .. } | Command::CheckConfig | Command::Completions { .. } => {
+            unreachable!()
+        }
     }
 
     output::report_warnings(&warnings, cli.verbose);

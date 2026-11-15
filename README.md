@@ -3,8 +3,9 @@
 Calcurse-style terminal calendar and todo manager in Rust, built on plain
 iCalendar files (vdir) synced with CalDAV (e.g. Radicale) via vdirsyncer.
 
-Status: milestone 5 (TUI with editing and rearrangeable layouts, shell
-commands, reminders). Next: packaging polish and styling. See [DESIGN.md](DESIGN.md)
+Status: all six planned milestones done (TUI with editing and rearrangeable
+layouts, shell commands, reminders, Nix packaging). Next: styling, and testing
+against real calendars. See [DESIGN.md](DESIGN.md)
 for the plan.
 
 ## Usage
@@ -114,6 +115,10 @@ programs.cal-tui = {
   };
 };
 ```
+
+Add `services.cal-tui-notify.enable = true;` for reminders. Shell completions
+(bash, zsh, fish) come with the package. To use it as `pkgs.cal-tui` instead,
+add `inputs.cal-tui.overlays.default` to your nixpkgs overlays.
 
 This installs `cal-tui` and writes `~/.config/cal-tui/config.toml`. The file is
 checked with `cal-tui check-config` during the build, so mistakes fail the

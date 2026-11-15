@@ -297,5 +297,6 @@ module (`accounts.calendar` + `services.vdirsyncer`).
 4. *(done)* **Notifications:** the `notify` daemon and a systemd unit.
 5. *(done)* **Layout engine:** presets, in-app rearranging, saving to the state file
    (config-defined layouts take precedence).
-6. **Packaging:** the Nix package and home-manager module exist already;
-   remaining: the `notify` systemd unit in the module, release builds.
+6. *(done)* **Packaging:** Nix package with shell completions, overlay,
+   home-manager module (`programs.cal-tui`, `services.cal-tui-notify`), all
+   covered by `nix flake check`.
