@@ -61,6 +61,32 @@ impl From<&WeatherConfig> for WeatherQuery {
     }
 }
 
+/// What a piece of the weather line is about, for colouring.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tone {
+    Sun,
+    Cloud,
+    Fog,
+    Rain,
+    Snow,
+    Storm,
+    /// A temperature, rounded.
+    Temp(i32),
+    Plain,
+}
+
+fn tone(code: u8) -> Tone {
+    match code {
+        0 | 1 => Tone::Sun,
+        2 | 3 => Tone::Cloud,
+        45 | 48 => Tone::Fog,
+        71..=77 | 85 | 86 => Tone::Snow,
+        95..=99 => Tone::Storm,
+        51..=67 | 80..=82 => Tone::Rain,
+        _ => Tone::Plain,
+    }
+}
+
 /// Symbol and words for a WMO weather code. Symbols are single-width so
 /// they line up in every terminal.
 pub fn describe(code: u8) -> (&'static str, &'static str) {
@@ -83,21 +109,38 @@ pub fn describe(code: u8) -> (&'static str, &'static str) {
 
 impl Forecast {
     /// One line for `date`, e.g. `☂ rain 80%, 2°–6°` (today also `4° now`).
+    #[cfg(test)]
     pub fn line(&self, date: NaiveDate, today: NaiveDate) -> Option<String> {
+        Some(
+            self.parts(date, today)?
+                .into_iter()
+                .map(|(s, _)| s)
+                .collect(),
+        )
+    }
+
+    /// The same line in pieces, each with what it is about, so the UI can
+    /// colour the condition and each temperature.
+    pub fn parts(&self, date: NaiveDate, today: NaiveDate) -> Option<Vec<(String, Tone)>> {
         let d = self.days.iter().find(|d| d.date == date)?;
         let (icon, text) = describe(d.code);
-        let mut s = format!("{icon} {text}");
+        let mut out = vec![(format!("{icon} {text}"), tone(d.code))];
         if let Some(p) = d.precip.filter(|p| *p >= 30) {
             if d.code >= 51 {
-                s.push_str(&format!(" {p}%"));
+                out.push((format!(" {p}%"), tone(d.code)));
             }
         }
-        let range = format!("{:.0}°–{:.0}°", d.min, d.max);
-        match self.current.filter(|_| date == today) {
-            Some((t, _)) => s.push_str(&format!(", {t:.0}° now ({range})")),
-            None => s.push_str(&format!(", {range}")),
+        let temp = |t: f64| (format!("{t:.0}°"), Tone::Temp(t.round() as i32));
+        let plain = |s: &str| (s.to_string(), Tone::Plain);
+        out.push(plain(", "));
+        if let Some((t, _)) = self.current.filter(|_| date == today) {
+            out.push(temp(t));
+            out.push(plain(" now ("));
+            out.extend([temp(d.min), plain("–"), temp(d.max), plain(")")]);
+        } else {
+            out.extend([temp(d.min), plain("–"), temp(d.max)]);
         }
-        Some(s)
+        Some(out)
     }
 }
 
@@ -378,6 +421,21 @@ pub mod tests {
         assert_eq!(f.line(d(11, 17), today).unwrap(), "☂ rain 85%, 2°–5°");
         assert_eq!(f.line(d(11, 18), today).unwrap(), "❄ snow 60%, -3°–0°");
         assert_eq!(f.line(d(12, 30), today), None);
+    }
+
+    #[test]
+    fn parts_say_what_they_are() {
+        let f = sample();
+        let d = NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        let p = f.parts(d, d).unwrap();
+        assert_eq!(p[0], ("☁ cloudy".to_string(), Tone::Cloud));
+        assert!(p.contains(&("4°".to_string(), Tone::Temp(4))));
+        assert!(p.contains(&("2°".to_string(), Tone::Temp(2))));
+        let snow = f
+            .parts(d.succ_opt().unwrap().succ_opt().unwrap(), d)
+            .unwrap();
+        assert_eq!(snow[0].1, Tone::Snow);
+        assert!(snow.contains(&("-3°".to_string(), Tone::Temp(-3))));
     }
 
     #[test]

@@ -1002,6 +1002,30 @@ mod tests {
         }
     }
 
+    #[test]
+    fn weather_is_coloured() {
+        use ratatui::style::Color;
+        let mut app = app();
+        app.weather = Some(crate::weather::Weather::fixed(
+            crate::weather::tests::sample(),
+        ));
+        let mut term = Terminal::new(TestBackend::new(110, 32)).unwrap();
+        term.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer();
+        let row: Vec<&ratatui::buffer::Cell> = (0..110).map(|x| &buf[(x, 0)]).collect();
+        let at = |s: &str| {
+            let text: String = row.iter().map(|c| c.symbol()).collect();
+            let i = text.find(s).unwrap_or_else(|| panic!("{s} not in {text}"));
+            row[text[..i].chars().count()].fg
+        };
+        let cloud = at("☁");
+        let now = at("4° now");
+        let sep = at(" now (");
+        assert_ne!(cloud, now, "condition and temperature differ");
+        assert_ne!(now, Color::Reset);
+        assert_ne!(cloud, sep);
+    }
+
     /// Render the screen as HTML (screen.html) with the colours of a base16
     /// terminal theme, for previewing styling choices:
     /// `CAL_TUI_PREVIEW_OUT=/tmp/x cargo test -p cal-tui export_previews -- --ignored`

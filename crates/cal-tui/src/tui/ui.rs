@@ -316,12 +316,41 @@ fn details(app: &App, inst: &Instance, rest: &[String]) -> Vec<Span<'static>> {
     spans
 }
 
-fn weather_text(app: &App) -> Option<String> {
+/// Colour for a piece of the weather line (tuned to the Stylix palette:
+/// yellow sun, blue rain, purple thunder; temperatures from icy to hot).
+fn weather_color(t: crate::weather::Tone) -> Color {
+    use crate::weather::Tone::*;
+    match t {
+        Sun => Color::Rgb(246, 211, 122),
+        Cloud => Color::Rgb(154, 165, 180),
+        Fog => Color::Rgb(130, 140, 155),
+        Rain => Color::Rgb(122, 167, 255),
+        Snow => Color::Rgb(168, 216, 234),
+        Storm => Color::Rgb(199, 146, 234),
+        Temp(c) if c <= 0 => Color::Rgb(126, 200, 227),
+        Temp(c) if c < 10 => Color::Rgb(197, 208, 222),
+        Temp(c) if c < 20 => Color::Rgb(127, 207, 125),
+        Temp(c) if c < 27 => Color::Rgb(242, 167, 107),
+        Temp(_) => Color::Rgb(226, 109, 109),
+        Plain => Color::Indexed(246),
+    }
+}
+
+/// The weather for the selected day as coloured spans.
+fn weather_line(app: &App) -> Option<Line<'static>> {
     let w = app.weather.as_ref()?;
     match &w.forecast {
-        Some(f) => f.line(app.date, app.today()),
+        Some(f) => {
+            let parts = f.parts(app.date, app.today())?;
+            Some(Line::from(
+                parts
+                    .into_iter()
+                    .map(|(s, t)| Span::styled(s, Style::new().fg(weather_color(t))))
+                    .collect::<Vec<_>>(),
+            ))
+        }
         None if w.error.is_some() && app.date == app.today() => {
-            Some("weather unavailable".to_string())
+            Some(Line::from("weather unavailable").fg(Color::Indexed(246)))
         }
         None => None,
     }
@@ -357,14 +386,11 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
         app.date.format("%A %-d %B %Y").to_string()
     };
     let inner = panel_frame(f, app, PanelKind::Appointments, &title, area, false);
-    if let Some(w) = weather_text(app) {
-        let need = title.chars().count() + w.chars().count() + 6;
+    if let Some(w) = weather_line(app) {
+        let need = title.chars().count() + w.width() + 6;
         if (area.width as usize) >= need {
             let row = Rect::new(area.x, area.y, area.width.saturating_sub(1), 1);
-            f.render_widget(
-                Paragraph::new(Line::from(w).fg(Color::Indexed(248)).right_aligned()),
-                row,
-            );
+            f.render_widget(Paragraph::new(w.right_aligned()), row);
         }
     }
     if inner.height == 0 || inner.width < 12 {
