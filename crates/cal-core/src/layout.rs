@@ -77,8 +77,13 @@ pub enum Node {
     Split(Dir, Size, Vec<Node>),
 }
 
-/// Height of the month calendar: border, weekday header, six weeks, border.
-pub const CALENDAR_HEIGHT: u16 = 9;
+/// Height of the month calendar: title, weekday header, six weeks with a
+/// blank line between them, and the divider below.
+pub const CALENDAR_HEIGHT: u16 = 15;
+
+/// Width of the side column (calendar + todo) in the built-in presets, including
+/// the divider: seven 5-cell day columns plus margins.
+pub const SIDE_WIDTH: u16 = 38;
 
 /// Names of the built-in presets, in cycling order.
 pub const BUILTIN: [&str; 4] = ["classic", "classic-left", "three-columns", "stacked"];
@@ -102,7 +107,7 @@ impl Node {
         let side = || {
             Node::Split(
                 Dir::Rows,
-                Size::Cells(32),
+                Size::Cells(SIDE_WIDTH),
                 vec![
                     Node::Panel(Calendar, Size::Cells(CALENDAR_HEIGHT)),
                     Node::Panel(Todo, Size::Fill),
@@ -125,7 +130,7 @@ impl Node {
                 Dir::Columns,
                 Size::Fill,
                 vec![
-                    Node::Panel(Calendar, Size::Cells(32)),
+                    Node::Panel(Calendar, Size::Cells(SIDE_WIDTH)),
                     Node::Panel(Appointments, Size::Fill),
                     Node::Panel(Todo, Size::Percent(30)),
                 ],

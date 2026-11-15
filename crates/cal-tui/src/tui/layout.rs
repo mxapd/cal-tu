@@ -255,21 +255,21 @@ mod tests {
     #[test]
     fn classic_layout_places_all_panels() {
         let r = rects(&Node::builtin("classic").unwrap(), 100, 30);
-        assert_eq!(get(&r, PanelKind::Appointments), Rect::new(0, 0, 68, 30));
-        assert_eq!(get(&r, PanelKind::Calendar), Rect::new(68, 0, 32, 9));
-        assert_eq!(get(&r, PanelKind::Todo), Rect::new(68, 9, 32, 21));
+        assert_eq!(get(&r, PanelKind::Appointments), Rect::new(0, 0, 62, 30));
+        assert_eq!(get(&r, PanelKind::Calendar), Rect::new(62, 0, 38, 15));
+        assert_eq!(get(&r, PanelKind::Todo), Rect::new(62, 15, 38, 15));
     }
 
     #[test]
     fn resize_along_and_across() {
         let area = Rect::new(0, 0, 100, 30);
         let mut n = Node::builtin("classic").unwrap();
-        // Appointments 68% → 73%.
+        // Appointments 62% → 67%.
         assert!(resize(&mut n, PanelKind::Appointments, true, 5, area));
-        assert_eq!(get(&rects(&n, 100, 30), PanelKind::Appointments).width, 73);
+        assert_eq!(get(&rects(&n, 100, 30), PanelKind::Appointments).width, 67);
         // Calendar taller within its column.
         assert!(resize(&mut n, PanelKind::Calendar, true, 10, area));
-        assert!(get(&rects(&n, 100, 30), PanelKind::Calendar).height > 9);
+        assert!(get(&rects(&n, 100, 30), PanelKind::Calendar).height > 15);
         // Across: the right-hand column (calendar + todo) gets wider.
         let before = get(&rects(&n, 100, 30), PanelKind::Todo).width;
         assert!(resize(&mut n, PanelKind::Todo, false, 10, area));

@@ -2,7 +2,7 @@
 
 use cal_core::{Kind, Moment};
 use chrono::{Datelike, Duration, NaiveDate};
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
@@ -26,13 +26,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     super::layout::resolve(&layout, main, &mut panels);
     app.main_area = main;
     app.shown_panels = panels.iter().map(|(k, _)| *k).collect();
+    let mut dividers = Dividers::new();
     for (kind, area) in panels {
+        let area = take_dividers(area, main, &mut dividers);
         match kind {
             PanelKind::Appointments => draw_appointments(f, app, area),
             PanelKind::Calendar => draw_calendar(f, app, area),
             PanelKind::Todo => draw_todo(f, app, area),
         }
     }
+    draw_dividers(f, &dividers);
     draw_status(f, app, status);
     draw_keys(f, app, keys);
 
@@ -63,35 +66,117 @@ fn cal_style(app: &App, cal: usize) -> Style {
     }
 }
 
-fn panel_block(app: &App, kind: PanelKind, title: String) -> Block<'static> {
-    let focused = app.focus == kind && app.popup.is_none();
-    if app.layout_mode {
-        // Layout mode: the panel being arranged stands out, others are quiet.
-        let block = Block::bordered()
-            .border_type(if focused {
-                BorderType::Double
-            } else {
-                BorderType::Rounded
-            })
-            .title(Line::from(format!(" {title} ")).alignment(Alignment::Center));
-        return if focused {
-            block
-                .border_style(Style::new().fg(Color::Yellow))
-                .title_style(Style::new().bold().fg(Color::Yellow))
-        } else {
-            block.border_style(Style::new().dark_gray())
+/// Cells used by thin dividers between panels.
+type Dividers = std::collections::BTreeSet<(u16, u16)>;
+
+/// A panel gives up its right column and bottom row to dividers, unless it
+/// touches the edge of the main area there.
+fn take_dividers(area: Rect, main: Rect, dividers: &mut Dividers) -> Rect {
+    let mut inner = area;
+    if area.right() < main.right() && area.width > 1 {
+        let x = area.right() - 1;
+        for y in area.top()..area.bottom() {
+            dividers.insert((x, y));
+        }
+        inner.width -= 1;
+    }
+    if area.bottom() < main.bottom() && area.height > 1 {
+        let y = area.bottom() - 1;
+        for x in area.left()..area.right() {
+            dividers.insert((x, y));
+        }
+        inner.height -= 1;
+    }
+    inner
+}
+
+/// Draw dividers, joining lines where they meet (├ ┤ ┬ ┴ ┼ and corners).
+fn draw_dividers(f: &mut Frame, dividers: &Dividers) {
+    let style = Style::new().fg(Color::Indexed(240));
+    let buf = f.buffer_mut();
+    for &(x, y) in dividers {
+        let has = |dx: i32, dy: i32| {
+            let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+            nx >= 0 && ny >= 0 && dividers.contains(&(nx as u16, ny as u16))
         };
+        let symbol = match (has(0, -1), has(0, 1), has(-1, 0), has(1, 0)) {
+            (true, true, true, true) => "┼",
+            (true, true, false, true) => "├",
+            (true, true, true, false) => "┤",
+            (false, true, true, true) => "┬",
+            (true, false, true, true) => "┴",
+            (false, true, false, true) => "┌",
+            (false, true, true, false) => "┐",
+            (true, false, false, true) => "└",
+            (true, false, true, false) => "┘",
+            (true, _, false, false) | (_, true, false, false) => "│",
+            _ => "─",
+        };
+        if let Some(cell) = buf.cell_mut((x, y)) {
+            cell.set_symbol(symbol).set_style(style);
+        }
     }
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .title(Line::from(format!(" {title} ")).alignment(Alignment::Center));
-    if focused {
-        block
-            .border_style(Style::new().fg(Color::Cyan))
-            .title_style(Style::new().bold())
+}
+
+/// Draw a panel's title row and return the area below it. The focused
+/// panel's title is bold in the accent colour (a yellow bar in layout mode).
+fn panel_frame(
+    f: &mut Frame,
+    app: &App,
+    kind: PanelKind,
+    title: &str,
+    area: Rect,
+    center: bool,
+) -> Rect {
+    if area.height == 0 {
+        return area;
+    }
+    let focused = app.focus == kind && app.popup.is_none();
+    let row = Rect::new(area.x, area.y, area.width, 1);
+    let text = format!(" {title} ");
+    let (line, bar) = if app.layout_mode && focused {
+        (
+            Line::from(text).bold().black(),
+            Style::new().bg(Color::Yellow),
+        )
+    } else if focused {
+        (Line::from(text).bold().fg(Color::Cyan), Style::new())
     } else {
-        block.border_style(Style::new().dark_gray())
+        (Line::from(text).fg(Color::Gray), Style::new())
+    };
+    let line = if center { line.centered() } else { line };
+    f.render_widget(Paragraph::new(line).style(bar), row);
+    Rect::new(area.x, area.y + 1, area.width, area.height - 1)
+}
+
+/// Highlight a selected row across the whole panel width.
+fn highlight_row(line: Line<'static>, width: u16, focused: bool) -> Line<'static> {
+    let bg = if focused {
+        Color::Indexed(24)
+    } else {
+        Color::Indexed(236)
+    };
+    let used = line.width();
+    let mut spans: Vec<Span<'static>> = line
+        .spans
+        .into_iter()
+        .map(|s| {
+            let st = s.style.bg(bg);
+            let st = if focused {
+                st.add_modifier(Modifier::BOLD)
+            } else {
+                st
+            };
+            Span::styled(s.content, st)
+        })
+        .collect();
+    if (width as usize) > used {
+        spans.push(Span::styled(
+            " ".repeat(width as usize - used),
+            Style::new().bg(bg),
+        ));
     }
+    Line::from(spans)
 }
 
 /// Render `lines` into the block, scrolled so that rows `sel` are visible.
@@ -113,9 +198,7 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         "Appointments".to_string()
     };
-    let block = panel_block(app, PanelKind::Appointments, title);
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = panel_frame(f, app, PanelKind::Appointments, &title, area, false);
 
     let focused = app.focus == PanelKind::Appointments;
     let home = app.store.home;
@@ -133,15 +216,6 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
     for (idx, inst) in app.day_items.iter().enumerate() {
         let cal = &app.store.calendars[inst.calendar];
         let selected = idx == app.appt_sel;
-        let hl = |s: Style| {
-            if selected && focused {
-                s.add_modifier(Modifier::REVERSED)
-            } else if selected {
-                s.add_modifier(Modifier::UNDERLINED)
-            } else {
-                s
-            }
-        };
         let bullet = if cal.read_only { "○" } else { "●" };
         let mut flags = String::new();
         if inst.recurrence_id.is_some() {
@@ -151,7 +225,7 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
             flags.push('>');
         }
         let tag = Span::styled(format!("  [{}]", cal.name), Style::new().dark_gray());
-        let summary = Span::styled(inst.summary.clone(), hl(cal_style(app, inst.calendar)));
+        let summary = Span::styled(inst.summary.clone(), cal_style(app, inst.calendar));
         let range = time_range(inst, app.date, home);
         let start_row = lines.len();
 
@@ -179,7 +253,7 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
                 timed_started = true;
                 lines.push(Line::from(vec![
                     Span::styled(format!(" {bullet} "), cal_style(app, inst.calendar)),
-                    Span::styled(range.arrow(), hl(Style::new())),
+                    Span::raw(range.arrow()),
                     Span::raw(format!(" {flags}")).dark_gray(),
                 ]));
                 let mut spans = vec![Span::raw("   "), summary];
@@ -195,6 +269,11 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
+    if let Some((a, b)) = sel_rows {
+        for line in &mut lines[a..=b] {
+            *line = highlight_row(std::mem::take(line), inner.width, focused);
+        }
+    }
     let lines = scrolled(lines, sel_rows, inner.height as usize);
     f.render_widget(Paragraph::new(lines), inner);
 }
@@ -208,9 +287,7 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
             app.date.format("%b %Y")
         ),
     };
-    let block = panel_block(app, PanelKind::Calendar, title);
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = panel_frame(f, app, PanelKind::Calendar, &title, area, true);
 
     let today = app.today();
     let focused = app.focus == PanelKind::Calendar;
@@ -224,9 +301,9 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
         }
         if d == app.date {
             s = if focused {
-                s.add_modifier(Modifier::REVERSED)
+                s.bg(Color::Indexed(24)).add_modifier(Modifier::BOLD)
             } else {
-                s.bg(Color::DarkGray)
+                s.bg(Color::Indexed(236))
             };
         }
         s
@@ -234,18 +311,48 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
 
     let lines: Vec<Line> = match app.cal_view {
         CalView::Month => {
+            // Day columns as wide as the panel allows (3–6 cells), centred.
+            let cw = (inner.width / 7).clamp(3, 6) as usize;
+            let pad = " ".repeat((inner.width as usize).saturating_sub(cw * 7) / 2);
+            // A blank line between weeks when there is room for it.
+            let gap = inner.height > 6 * 2; // header row + 6 weeks × 2
+                                            // A cell: the 2-digit text centred, with one space of highlight
+                                            // on each side when the cell is wide enough.
+            let cell = |text: String, style: Style| -> Vec<Span<'static>> {
+                let left = (cw - 2) / 2;
+                let right = cw - 2 - left;
+                if left >= 1 && right >= 1 {
+                    vec![
+                        Span::raw(" ".repeat(left - 1)),
+                        Span::styled(format!(" {text} "), style),
+                        Span::raw(" ".repeat(right - 1)),
+                    ]
+                } else {
+                    vec![
+                        Span::raw(" ".repeat(left)),
+                        Span::styled(text, style),
+                        Span::raw(" ".repeat(right)),
+                    ]
+                }
+            };
             let (start, _) = app.visible_range();
-            let mut lines = vec![Line::from("Mo Tu We Th Fr Sa Su").dark_gray()];
+            let mut header = vec![Span::raw(pad.clone())];
+            for name in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] {
+                header.extend(cell(name.into(), Style::new().fg(Color::Indexed(244))));
+            }
+            let mut lines = vec![Line::from(header)];
             for week in 0..6 {
-                let mut spans = Vec::new();
+                if gap {
+                    lines.push(Line::from(""));
+                }
+                let mut spans = vec![Span::raw(pad.clone())];
                 for wd in 0..7 {
                     let d = start + Duration::days(week * 7 + wd);
-                    if d.month() != app.date.month() {
-                        spans.push(Span::raw("   "));
-                        continue;
+                    if d.month() == app.date.month() {
+                        spans.extend(cell(format!("{:>2}", d.day()), day_style(d)));
+                    } else {
+                        spans.push(Span::raw(" ".repeat(cw)));
                     }
-                    spans.push(Span::styled(format!("{:>2}", d.day()), day_style(d)));
-                    spans.push(Span::raw(" "));
                 }
                 lines.push(Line::from(spans));
             }
@@ -253,37 +360,36 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
         }
         CalView::Week => {
             let (start, _) = app.visible_range();
-            (0..7)
-                .map(|n| {
-                    let d = start + Duration::days(n);
-                    let mut spans = vec![
-                        Span::styled(d.format("%a %d").to_string(), day_style(d)),
-                        Span::raw("  "),
-                    ];
-                    for cal in app.marks.get(&d).into_iter().flatten().take(6) {
-                        spans.push(Span::styled("●", cal_style(app, *cal)));
-                    }
-                    Line::from(spans)
-                })
-                .collect()
+            let gap = inner.height >= 7 * 2 - 1;
+            let mut lines = Vec::new();
+            for n in 0..7 {
+                if gap && n > 0 {
+                    lines.push(Line::from(""));
+                }
+                let d = start + Duration::days(n);
+                let mut spans = vec![
+                    Span::raw(" "),
+                    Span::styled(format!(" {} ", d.format("%a %d")), day_style(d)),
+                    Span::raw(" "),
+                ];
+                for cal in app.marks.get(&d).into_iter().flatten().take(6) {
+                    spans.push(Span::styled("● ", cal_style(app, *cal)));
+                }
+                lines.push(Line::from(spans));
+            }
+            lines
         }
     };
-    // Centre the 20-column grid.
-    let width = 20u16.min(inner.width);
-    let x = inner.x + (inner.width - width) / 2;
-    let grid = Rect::new(x, inner.y, inner.width - (x - inner.x), inner.height);
-    f.render_widget(Paragraph::new(lines), grid);
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_todo(f: &mut Frame, app: &mut App, area: Rect) {
     let title = if app.show_completed {
-        "TODO (all)"
+        "Todo (all)"
     } else {
-        "TODO"
+        "Todo"
     };
-    let block = panel_block(app, PanelKind::Todo, title.to_string());
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = panel_frame(f, app, PanelKind::Todo, title, area, false);
 
     let focused = app.focus == PanelKind::Todo;
     let mut lines = Vec::new();
@@ -294,9 +400,6 @@ fn draw_todo(f: &mut Frame, app: &mut App, area: Rect) {
         let mut style = cal_style(app, t.calendar);
         if t.completed {
             style = style.add_modifier(Modifier::CROSSED_OUT | Modifier::DIM);
-        }
-        if idx == app.todo_sel && focused {
-            style = style.add_modifier(Modifier::REVERSED);
         }
         let prio = if t.completed {
             "x".to_string()
@@ -319,7 +422,12 @@ fn draw_todo(f: &mut Frame, app: &mut App, area: Rect) {
                 label.dark_gray()
             });
         }
-        lines.push(Line::from(spans));
+        let line = Line::from(spans);
+        lines.push(if idx == app.todo_sel {
+            highlight_row(line, inner.width, focused)
+        } else {
+            line
+        });
     }
     let lines = scrolled(
         lines,
@@ -458,7 +566,7 @@ fn popup_area(f: &Frame, width: u16, height: u16) -> Rect {
 
 fn popup_block(title: &str) -> Block<'_> {
     Block::bordered()
-        .border_type(BorderType::Rounded)
+        .border_type(BorderType::Plain)
         .border_style(Style::new().fg(Color::Cyan))
         .title(Line::from(format!(" {title} ")).bold().centered())
 }

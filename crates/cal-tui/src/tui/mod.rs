@@ -195,7 +195,6 @@ mod tests {
             "Linear Algebra, lecture · Hall A",
             "Lunch with Anna",
             "November 2026",
-            "Mo Tu We Th Fr Sa Su",
             "Pay rent",
             "Fix bike",
             "next: Lunch with Anna in 28m",
@@ -434,7 +433,10 @@ mod tests {
         press(&mut app, '-');
         assert!(app.layout_modified);
         let screen = render(&mut app);
-        assert!(!screen.contains("TODO"), "{screen}");
+        assert!(
+            !app.shown_panels.contains(&layout::PanelKind::Todo),
+            "{screen}"
+        );
         assert!(screen.contains("classic (changed)"));
 
         // Save: becomes "custom" and the default next time.
@@ -445,7 +447,8 @@ mod tests {
         assert!(saved.contains("active = \"custom\""), "{saved}");
         let mut again = app_with(FIXTURES, "", &state);
         assert_eq!(again.layout_name, "custom");
-        assert!(!render(&mut again).contains("TODO"));
+        render(&mut again);
+        assert!(!again.shown_panels.contains(&layout::PanelKind::Todo));
     }
 
     #[test]
@@ -466,7 +469,10 @@ mod tests {
         let mut app = app_with(FIXTURES, cfg, &state);
         assert_eq!(app.layout_name, "agenda");
         let screen = render(&mut app);
-        assert!(!screen.contains("Mo Tu We"), "no calendar panel:\n{screen}");
+        assert!(
+            !app.shown_panels.contains(&layout::PanelKind::Calendar),
+            "no calendar panel:\n{screen}"
+        );
         snapshot::assert_snapshot("tui_config_layout", &screen);
         // Saving says that the config still decides.
         press(&mut app, 'w');
