@@ -1,40 +1,40 @@
-┌────────────────────────────────────────────────┐
-│               ‹  November 2026  ›              │
-│         v  Mo  Tu  We  Th  Fr  Sa  Su          │
-│        44  26  27  28  29  30  31   1          │
-│        45   2   3   4   5   6   7   8          │
-│        46   9  10  11  12  13  14  15          │
-│        47  16  17  18  19  20  21  22          │
-│        48  23  24  25  26  27  28  29          │
-│        49  30   1   2   3   4   5   6          │
-│ ────────────────────────────────────────────── │
-│ Tue 17  ● 09:00 Floating standup               │
-│ Wed 18  ● due Pay rent                         │
-│         ● 18:30 Climbing                       │
-│ Fri 20  ● all day Weekend trip                 │
-│ Mon 23  ● 08:15 Linear Algebra, lecture        │
-│         ● 18:30 Climbing                       │
-│ Wed 25  ● 18:30 Climbing                       │
-├────────────────────────────────────────────────┤
-│ Appointments · today                           │
-│ Monday, November 16, 2026                      │
-│                                                │
-│ ○ 08:15 -> 10:00 *                             │
-│   Linear Algebra, lecture · Hall A  [University│
-│ ● 12:00 -> 13:00                               │
-│   Lunch with Anna · Café Lisa  [personal]      │
-├────────────────────────────────────────────────┤
-│                      Todo                      │
-│ 1. Pay rent 18 Nov                             │
-│ 5. Fix bike                                    │
-│                                                │
-│                                                │
-│                                                │
-│                                                │
-│                                                │
-│                                                │
-│                                                │
-│                                                │
-│ Mon 16 Nov 2026 │ 11:32 │ ● personal ● Universi│
-│ ? Help  Tab Panel  h/l Day  j/k Move  g Goto  t│
-└────────────────────────────────────────────────┘
+                ‹  November 2026  ›               
+          v  Mo  Tu  We  Th  Fr  Sa  Su           
+         44  26• 27  28  29• 30  31   1•          
+         45   2•  3   4   5   6   7   8•          
+         46   9• 10  11• 12  13  14  15•          
+         47  16• 17• 18• 19  20• 21• 22•          
+         48  23• 24  25• 26  27  28  29           
+         49  30•  1   2•  3   4   5   6           
+ ──────────────────────────────────────────────── 
+ Tomorrow · Tue 17 Nov                            
+  09:00 Floating standup                          
+ Wednesday 18 Nov                                 
+  due   Pay rent                                  
+  18:30 Climbing                                  
+ Friday 20 Nov                                    
+        Weekend trip                              
+──────────────────────────────────────────────────
+ Appointments · today                             
+ Monday, November 16, 2026                        
+                                                  
+ ○ 08:15 -> 10:00 *                               
+   Linear Algebra, lecture · Hall A  [University] 
+ ● 12:00 -> 13:00                                 
+   Lunch with Anna · Café Lisa  [personal]        
+ ● 18:30 -> 20:00 *                               
+   Climbing  [personal]                           
+──────────────────────────────────────────────────
+                       Todo                       
+ 1. Pay rent 18 Nov                               
+ 5. Fix bike                                      
+                                                  
+                                                  
+                                                  
+                                                  
+                                                  
+                                                  
+                                                  
+                                                  
+ Mon 16 Nov 2026 │ 11:32 │ ● personal ● University
+ ? Help  Tab Panel  h/l Day  j/k Move  g Goto  t T

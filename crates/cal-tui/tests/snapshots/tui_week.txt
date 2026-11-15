@@ -1,32 +1,32 @@
-┌─────────────────────────────────────────────────────────────────────┬──────────────────────────────────────┐
-│ Appointments · today                                                │       ‹  Week 47 · Nov 2026  ›       │
-│ Monday, November 16, 2026                                           │  Mon 16  ● ●                         │
-│                                                                     │                                      │
-│ ○ 08:15 -> 10:00 *                                                  │  Tue 17  ●                           │
-│   Linear Algebra, lecture · Hall A  [University]                    │                                      │
-│ ● 12:00 -> 13:00                                                    │  Wed 18  ●                           │
-│   Lunch with Anna · Café Lisa  [personal]                           │                                      │
-│ ● 18:30 -> 20:00 *                                                  │  Thu 19                              │
-│   Climbing  [personal]                                              │                                      │
-│                                                                     │  Fri 20  ●                           │
-│                                                                     │                                      │
-│                                                                     │  Sat 21  ●                           │
-│                                                                     │                                      │
-│                                                                     │  Sun 22  ●                           │
-│                                                                     │                                      │
-│                                                                     │                                      │
-│                                                                     ├──────────────────────────────────────┤
-│                                                                     │                 Todo                 │
-│                                                                     │ 1. Pay rent 18 Nov                   │
-│                                                                     │ 5. Fix bike                          │
-│                                                                     │                                      │
-│                                                                     │                                      │
-│                                                                     │                                      │
-│                                                                     │                                      │
-│                                                                     │                                      │
-│                                                                     │                                      │
-│                                                                     │                                      │
-│                                                                     │                                      │
-│ Mon 16 Nov 2026 │ 11:32 │ ● personal ● University │ next: Lunch with Anna in 28m │ ⚠ 3 (W)                 │
-│ ? Help  Tab Panel  h/l Day  j/k Move  g Goto  t Today  a Add  e Edit  d Delete  Enter View  S Sync  q Quit │
-└────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+ Appointments · today                                                  │       ‹  Week 47 · Nov 2026  ›       
+ Monday, November 16, 2026                                             │  Mon 16  ● ●                         
+                                                                       │                                      
+ ○ 08:15 -> 10:00 *                                                    │  Tue 17  ●                           
+   Linear Algebra, lecture · Hall A  [University]                      │                                      
+ ● 12:00 -> 13:00                                                      │  Wed 18  ●                           
+   Lunch with Anna · Café Lisa  [personal]                             │                                      
+ ● 18:30 -> 20:00 *                                                    │  Thu 19                              
+   Climbing  [personal]                                                │                                      
+                                                                       │  Fri 20  ●                           
+                                                                       │                                      
+                                                                       │  Sat 21  ●                           
+                                                                       │                                      
+                                                                       │  Sun 22  ●                           
+                                                                       │                                      
+                                                                       │                                      
+                                                                       ├──────────────────────────────────────
+                                                                       │                 Todo                 
+                                                                       │ 1. Pay rent 18 Nov                   
+                                                                       │ 5. Fix bike                          
+                                                                       │                                      
+                                                                       │                                      
+                                                                       │                                      
+                                                                       │                                      
+                                                                       │                                      
+                                                                       │                                      
+                                                                       │                                      
+                                                                       │                                      
+                                                                       │                                      
+                                                                       │                                      
+ Mon 16 Nov 2026 │ 11:32 │ ● personal ● University │ next: Lunch with Anna in 28m │ ⚠ 3 (W)                   
+ ? Help  Tab Panel  h/l Day  j/k Move  g Goto  t Today  a Add  e Edit  d Delete  Enter View  S Sync  q Quit   

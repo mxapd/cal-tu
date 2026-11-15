@@ -586,7 +586,11 @@ mod tests {
                     .skip(r.x as usize)
                     .take(r.width as usize)
                     .collect();
-                assert_eq!(row.trim(), d.format("%-d").to_string(), "{d}");
+                assert_eq!(
+                    row.trim().trim_end_matches('•'),
+                    d.format("%-d").to_string(),
+                    "{d}"
+                );
             }
         }
         click_on(&mut app, app::Hit::Day(day(11, 20)));
@@ -810,10 +814,18 @@ mod tests {
     }
 
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`
+    /// (set CAL_TUI_SCREEN_DIR to render a real calendars folder instead).
     #[test]
     #[ignore]
     fn print_screen() {
-        let mut app = app();
+        let mut app = match std::env::var("CAL_TUI_SCREEN_DIR") {
+            Ok(dir) => app_with(
+                &dir,
+                "[calendars.lnu-timeedit]\nread_only = true\nname = \"LNU\"",
+                Path::new("/nonexistent/x.toml"),
+            ),
+            Err(_) => app(),
+        };
         println!("{}", render(&mut app));
         app.focus = layout::PanelKind::Calendar;
         app.cal_view = app::CalView::Week;

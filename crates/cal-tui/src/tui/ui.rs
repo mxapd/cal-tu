@@ -2,7 +2,7 @@
 
 use cal_core::{Kind, Moment};
 use chrono::{Datelike, Duration, NaiveDate};
-use ratatui::layout::{Constraint, Layout, Margin, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
@@ -13,24 +13,8 @@ use super::form::{FieldId, Form};
 use super::layout::{Dir, PanelKind};
 use crate::fmt::{humanize, parse_color, time_range, Rgb, TimeRange};
 
-/// Colour of the outline around the whole program.
-const FRAME: Color = Color::Black;
-
 pub fn draw(f: &mut Frame, app: &mut App) {
-    // A square outline around everything (too small a terminal: no outline).
-    let outer = f.area();
-    let framed = outer.width >= 20 && outer.height >= 8;
-    let content = if framed {
-        f.render_widget(
-            Block::bordered()
-                .border_type(BorderType::Plain)
-                .border_style(Style::new().fg(FRAME)),
-            outer,
-        );
-        outer.inner(Margin::new(1, 1))
-    } else {
-        outer
-    };
+    let content = f.area();
     let [main, status, keys] = Layout::vertical([
         Constraint::Fill(1),
         Constraint::Length(1),
@@ -65,9 +49,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
     }
     draw_dividers(f, &dividers);
-    if framed {
-        join_frame(f, &dividers, main, outer);
-    }
     draw_status(f, app, status);
     draw_keys(f, app, keys);
 
@@ -100,11 +81,41 @@ pub fn color(c: Option<&str>) -> Option<Color> {
     })
 }
 
+/// Colours for calendars without one of their own, chosen by a stable hash of
+/// the folder name so a calendar keeps its colour.
+const PALETTE: [Color; 6] = [
+    Color::LightCyan,
+    Color::LightMagenta,
+    Color::LightYellow,
+    Color::LightGreen,
+    Color::LightBlue,
+    Color::LightRed,
+];
+
+/// A calendar's colour: configured (or from the vdir `color` file), else
+/// one from the palette.
+pub fn cal_color(app: &App, cal: usize) -> Color {
+    let c = &app.store.calendars[cal];
+    color(c.color.as_deref()).unwrap_or_else(|| {
+        let h =
+            c.id.bytes()
+                .fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize));
+        PALETTE[h % PALETTE.len()]
+    })
+}
+
 fn cal_style(app: &App, cal: usize) -> Style {
-    match color(app.store.calendars[cal].color.as_deref()) {
-        Some(c) => Style::new().fg(c),
-        None => Style::new(),
+    Style::new().fg(cal_color(app, cal))
+}
+
+/// Shorten to `max` characters, ending in … if cut.
+fn ellipsize(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
     }
+    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    out
 }
 
 /// Cells used by thin dividers between panels.
@@ -129,28 +140,6 @@ fn take_dividers(area: Rect, main: Rect, dividers: &mut Dividers) -> Rect {
         inner.height -= 1;
     }
     inner
-}
-
-/// Where a divider meets the outline, draw a T-junction in the outline.
-fn join_frame(f: &mut Frame, dividers: &Dividers, main: Rect, outer: Rect) {
-    let style = Style::new().fg(FRAME);
-    let buf = f.buffer_mut();
-    let mut set = |x: u16, y: u16, s: &str| {
-        if let Some(cell) = buf.cell_mut((x, y)) {
-            cell.set_symbol(s).set_style(style);
-        }
-    };
-    for &(x, y) in dividers {
-        if y == main.y && !dividers.contains(&(x.wrapping_sub(1), y)) {
-            set(x, outer.y, "┬");
-        }
-        if x == main.x {
-            set(outer.x, y, "├");
-        }
-        if x == main.right() - 1 {
-            set(outer.right() - 1, y, "┤");
-        }
-    }
 }
 
 /// Draw dividers, joining lines where they meet (├ ┤ ┬ ┴ ┼ and corners).
@@ -453,10 +442,23 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                     around = around.bg(bg);
                     text = text.bg(bg).add_modifier(Modifier::BOLD);
                 }
+                // A dot after the number marks days with items, in the colour
+                // of the (first) calendar involved.
+                let dot = match app.marks.get(&d).and_then(|c| c.first()) {
+                    Some(cal) if cw >= 4 => {
+                        let c = if d.month() != app.date.month() {
+                            Color::Indexed(240)
+                        } else {
+                            cal_color(app, *cal)
+                        };
+                        Span::styled("•", around.fg(c))
+                    }
+                    _ => Span::styled(" ".repeat(cw - 3), around),
+                };
                 vec![
                     Span::styled(" ", around),
                     Span::styled(format!("{:>2}", d.day()), text),
-                    Span::styled(" ".repeat(cw - 3), around),
+                    dot,
                 ]
             };
 
@@ -489,7 +491,9 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                 lines.push(Line::from(spans));
             }
 
-            // Below the grid: what comes after the selected day.
+            // Below the grid: what comes after the selected day. Day headers
+            // on their own line, items as "13:15 Title" with the time in the
+            // calendar's colour, so titles get most of the width.
             let room = (inner.height as usize).saturating_sub(lines.len());
             if room >= 3 {
                 lines.push(
@@ -503,33 +507,49 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                     lines.push(Line::from(" nothing in the next two weeks").style(dim));
                 }
                 let from = app.date + Duration::days(1);
+                let title_w = (inner.width as usize).saturating_sub(9);
                 let mut last_day = None;
                 for i in &app.upcoming {
+                    let day = i.start.date_in(home).max(from);
+                    if last_day != Some(day) {
+                        // A header without room for one item under it is pointless.
+                        if lines.len() + 2 > inner.height as usize {
+                            break;
+                        }
+                        last_day = Some(day);
+                        if let Some(r) = row_rect(lines.len()) {
+                            hits.push((r, Hit::AgendaDay(day)));
+                        }
+                        let when = if day == today + Duration::days(1) {
+                            day.format(" Tomorrow · %a %-d %b").to_string()
+                        } else {
+                            day.format(" %A %-d %b").to_string()
+                        };
+                        lines.push(Line::from(when).style(label.add_modifier(Modifier::BOLD)));
+                    }
                     if lines.len() >= inner.height as usize {
                         break;
                     }
-                    let day = i.start.date_in(home).max(from);
-                    let date = if last_day != Some(day) {
-                        Span::styled(format!(" {}  ", day.format("%a %d")), label)
-                    } else {
-                        Span::raw(" ".repeat(9))
-                    };
-                    last_day = Some(day);
                     if let Some(r) = row_rect(lines.len()) {
                         hits.push((r, Hit::AgendaDay(day)));
                     }
-                    let when = if i.kind == Kind::Todo {
-                        "due".to_string()
+                    let colour = cal_style(app, i.calendar);
+                    let (when, title_style) = if i.kind == Kind::Todo {
+                        ("due  ".to_string(), Style::new())
                     } else if i.all_day {
-                        "all day".to_string()
+                        // No time: the title itself carries the colour.
+                        ("     ".to_string(), colour)
                     } else {
-                        i.start.instant(home).format("%H:%M").to_string()
+                        (
+                            i.start.instant(home).format("%H:%M").to_string(),
+                            Style::new(),
+                        )
                     };
                     lines.push(Line::from(vec![
-                        date,
-                        Span::styled("● ", cal_style(app, i.calendar)),
-                        Span::styled(format!("{when} "), label),
-                        Span::raw(i.summary.clone()),
+                        Span::raw("  "),
+                        Span::styled(when, colour),
+                        Span::raw(" "),
+                        Span::styled(ellipsize(&i.summary, title_w), title_style),
                     ]));
                 }
             }
@@ -653,11 +673,8 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
         Span::raw(format!("{} ", now.format("%H:%M"))).bold(),
         Span::raw("│ "),
     ];
-    for cal in app.store.calendars.iter() {
-        let style = match color(cal.color.as_deref()) {
-            Some(c) => Style::new().fg(c),
-            None => Style::new(),
-        };
+    for (i, cal) in app.store.calendars.iter().enumerate() {
+        let style = cal_style(app, i);
         if cal.hidden {
             spans.push(
                 Span::raw(format!("○ {} ", cal.name))
@@ -938,10 +955,7 @@ fn draw_calendars(f: &mut Frame, app: &App, sel: usize) {
             if i == sel {
                 style = style.add_modifier(Modifier::REVERSED);
             }
-            let dot_style = match color(cal.color.as_deref()) {
-                Some(c) => Style::new().fg(c),
-                None => Style::new(),
-            };
+            let dot_style = cal_style(app, i);
             Line::from(vec![
                 Span::styled(format!(" {check} "), style),
                 Span::styled("● ", dot_style),
