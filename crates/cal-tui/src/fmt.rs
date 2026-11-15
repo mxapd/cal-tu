@@ -31,18 +31,6 @@ impl TimeRange {
             ),
         }
     }
-
-    /// calcurse-style arrow form, e.g. `08:15 -> 10:00`.
-    pub fn arrow(&self) -> String {
-        match self {
-            TimeRange::Span(s, e) => format!(
-                "{} -> {}",
-                s.as_deref().unwrap_or("..:.."),
-                e.as_deref().unwrap_or("..:..")
-            ),
-            other => other.column().trim_end().to_string(),
-        }
-    }
 }
 
 pub fn time_range(i: &Instance, day: chrono::NaiveDate, home: Tz) -> TimeRange {

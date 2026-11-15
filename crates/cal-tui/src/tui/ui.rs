@@ -1,6 +1,6 @@
 //! Drawing the TUI.
 
-use cal_core::{Kind, Moment};
+use cal_core::{Instance, Kind, Moment};
 use chrono::{Datelike, Duration, NaiveDate};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
@@ -248,112 +248,375 @@ fn screen_row(inner: Rect, row: usize, offset: usize) -> Option<u16> {
     (r < inner.height as usize).then(|| inner.y + r as u16)
 }
 
+/// First and last hour shown by the day grid unless events fall outside.
+const DAY_FIRST_HOUR: u32 = 8;
+const DAY_LAST_HOUR: u32 = 20;
+/// Faint background of event blocks, so their length shows.
+const BLOCK_BG: Color = Color::Indexed(235);
+/// Colour of the "now" line.
+const NOW: Color = Color::Rgb(215, 95, 95);
+
+/// Title and extra details of an item. Comma-separated titles from read-only
+/// feeds ("Seminarium, Ola Flygt, 2DV704") keep only the first part as the
+/// title; the rest becomes details.
+pub fn split_title(app: &App, inst: &Instance) -> (String, Vec<String>) {
+    let cal = &app.store.calendars[inst.calendar];
+    if cal.read_only && inst.summary.contains(", ") {
+        let mut parts = inst.summary.split(", ").map(str::to_string);
+        let first = parts.next().unwrap_or_default();
+        return (first, parts.collect());
+    }
+    (inst.summary.clone(), Vec::new())
+}
+
+/// Second line of an item: room, the rest of a split title, markers and the
+/// calendar name.
+fn details(app: &App, inst: &Instance, rest: &[String]) -> Vec<Span<'static>> {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(l) = &inst.location {
+        parts.push(l.clone());
+    }
+    parts.extend(rest.iter().cloned());
+    let mut spans = Vec::new();
+    if !parts.is_empty() {
+        spans.push(Span::raw(parts.join(" · ")).fg(Color::Indexed(250)));
+        spans.push(Span::raw(" "));
+    }
+    let mut marks = String::new();
+    if inst.recurrence_id.is_some() {
+        marks.push_str("↻ ");
+    }
+    if inst.description.is_some() {
+        marks.push_str("≡ ");
+    }
+    if !marks.is_empty() {
+        spans.push(Span::raw(marks).fg(Color::Indexed(246)));
+    }
+    spans.push(Span::styled(
+        format!(" {}", app.store.calendars[inst.calendar].name),
+        cal_style(app, inst.calendar),
+    ));
+    spans
+}
+
+fn weather_text(app: &App) -> Option<String> {
+    let w = app.weather.as_ref()?;
+    match &w.forecast {
+        Some(f) => f.line(app.date, app.today()),
+        None if w.error.is_some() && app.date == app.today() => {
+            Some("weather unavailable".to_string())
+        }
+        None => None,
+    }
+}
+
+/// Write `line` into the buffer at (x, y), at most `width` cells, with `bg`
+/// under every cell of that width.
+fn put(
+    buf: &mut ratatui::buffer::Buffer,
+    x: u16,
+    y: u16,
+    width: u16,
+    line: Line<'_>,
+    bg: Option<Color>,
+) {
+    if let Some(bg) = bg {
+        buf.set_style(Rect::new(x, y, width, 1), Style::new().bg(bg));
+    }
+    buf.set_line(x, y, &line, width);
+}
+
+/// The appointments panel: a header with the date and weather, all-day items,
+/// then an hour grid with events as blocks.
 fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
-    let title = if app.date == app.today() {
-        "Appointments · today".to_string()
+    let today = app.today();
+    let is_today = app.date == today;
+    let title = if is_today {
+        app.date.format("%A %-d %B · today").to_string()
     } else {
-        "Appointments".to_string()
+        app.date.format("%A %-d %B %Y").to_string()
     };
     let inner = panel_frame(f, app, PanelKind::Appointments, &title, area, false);
+    if let Some(w) = weather_text(app) {
+        let need = title.chars().count() + w.chars().count() + 6;
+        if (area.width as usize) >= need {
+            let row = Rect::new(area.x, area.y, area.width.saturating_sub(1), 1);
+            f.render_widget(
+                Paragraph::new(Line::from(w).fg(Color::Indexed(248)).right_aligned()),
+                row,
+            );
+        }
+    }
+    if inner.height == 0 || inner.width < 12 {
+        return;
+    }
 
     let focused = app.focus == PanelKind::Appointments;
     let home = app.store.home;
-    let mut date_line = vec![Span::raw(app.date.format(" %A, %B %-d, %Y").to_string()).bold()];
-    if let Some(w) = &app.weather {
-        let text = match &w.forecast {
-            Some(f) => f.line(app.date, app.today()),
-            None if w.error.is_some() && app.date == app.today() => {
-                Some("weather unavailable".to_string())
-            }
-            None => None,
-        };
-        if let Some(t) = text {
-            date_line.push(Span::raw(format!("   {t}")).fg(Color::Indexed(248)));
-        }
-    }
-    let mut lines: Vec<Line> = vec![Line::from(date_line), Line::from("")];
-    let mut sel_rows = None;
-    let mut item_rows = Vec::new();
+    let now = app.now();
+    let sel_bg = if focused {
+        Color::Indexed(24)
+    } else {
+        Color::Indexed(238)
+    };
+    let label = Style::new().fg(Color::Indexed(244));
+    let mut hits: Vec<(Rect, Hit)> = Vec::new();
+    let buf = f.buffer_mut();
 
+    // All-day items and due todos: one row each at the top.
+    let (all_day, timed): (Vec<usize>, Vec<usize>) = (0..app.day_items.len()).partition(|&i| {
+        matches!(
+            time_range(&app.day_items[i], app.date, home),
+            TimeRange::AllDay | TimeRange::Due(_)
+        )
+    });
+    let mut y = inner.y;
     if app.day_items.is_empty() {
-        lines.push(Line::from("  nothing scheduled").dark_gray());
+        put(
+            buf,
+            inner.x,
+            y,
+            inner.width,
+            Line::from(" nothing scheduled").style(label),
+            None,
+        );
+        y += 1;
     }
-
-    let mut timed_started = false;
-    for (idx, inst) in app.day_items.iter().enumerate() {
-        let cal = &app.store.calendars[inst.calendar];
+    for &idx in &all_day {
+        if y + 2 > inner.bottom() {
+            break;
+        }
+        let inst = &app.day_items[idx];
         let selected = idx == app.appt_sel;
-        let bullet = if cal.read_only { "○" } else { "●" };
-        let mut flags = String::new();
-        if inst.recurrence_id.is_some() {
-            flags.push('*');
-        }
-        if inst.description.is_some() {
-            flags.push('>');
-        }
-        // Titles in bold normal text for contrast; the calendar colour goes on
-        // the bullet and the tag.
-        let tag = Span::styled(format!("  [{}]", cal.name), cal_style(app, inst.calendar));
-        let summary = Span::styled(inst.summary.clone(), Style::new().bold());
-        let range = time_range(inst, app.date, home);
-        let start_row = lines.len();
+        let (title, rest) = split_title(app, inst);
+        let lead = match time_range(inst, app.date, home) {
+            TimeRange::Due(Some(t)) => format!(" due {t} "),
+            TimeRange::Due(None) => " due   ".to_string(),
+            _ => " all day".to_string(),
+        };
+        let mut spans = vec![
+            Span::styled(format!("{lead:<7}"), label),
+            Span::styled(" ▌ ", cal_style(app, inst.calendar)),
+            Span::raw(title).bold(),
+            Span::raw("  "),
+        ];
+        spans.extend(details(app, inst, &rest));
+        let bg = selected.then_some(sel_bg);
+        put(buf, inner.x, y, inner.width, Line::from(spans), bg);
+        hits.push((Rect::new(inner.x, y, inner.width, 1), Hit::Appointment(idx)));
+        y += 1;
+    }
 
-        match range {
-            TimeRange::AllDay | TimeRange::Due(_) => {
-                let lead = if inst.kind == Kind::Todo {
-                    "[ ]"
-                } else {
-                    bullet
+    // The hour grid.
+    let grid = Rect::new(inner.x, y, inner.width, inner.bottom().saturating_sub(y));
+    if grid.height >= 2 {
+        let day_start = app.store.day_start(app.date);
+        let day_end = app.store.day_start(app.date + Duration::days(1));
+        let minutes = |t: chrono::DateTime<chrono_tz::Tz>| {
+            (t.clamp(day_start, day_end) - day_start)
+                .num_minutes()
+                .max(0) as u32
+        };
+        // (index, start minute, end minute) of each timed item today.
+        let spans_min: Vec<(usize, u32, u32)> = timed
+            .iter()
+            .map(|&i| {
+                let inst = &app.day_items[i];
+                let s = minutes(inst.start.instant(home));
+                let e = minutes(inst.end.instant(home)).max(s + 1);
+                (i, s, e)
+            })
+            .collect();
+        let mut first = DAY_FIRST_HOUR;
+        let mut last = DAY_LAST_HOUR;
+        for &(_, s, e) in &spans_min {
+            first = first.min(s / 60);
+            last = last.max(e.div_ceil(60));
+        }
+        let now_min = is_today.then(|| minutes(now));
+        if let Some(n) = now_min {
+            first = first.min(n / 60);
+            last = last.max(n / 60 + 1);
+        }
+        let mut last = last.min(24);
+        let rph = (grid.height as u32 / (last - first)).clamp(1, 4);
+        // Use leftover rows for more hours: the evening first, then the morning.
+        let fits = grid.height as u32 / rph;
+        while last - first < fits && last < 24 {
+            last += 1;
+        }
+        while last - first < fits && first > 0 {
+            first -= 1;
+        }
+        let hours = last - first;
+        let slot = 60 / rph;
+        let total = hours * rph;
+        let row_of = |m: u32| (m.saturating_sub(first * 60)) / slot;
+
+        // Scroll so the selected item (or now) is in view when it does not fit.
+        let focus_row = spans_min
+            .iter()
+            .find(|(i, _, _)| *i == app.appt_sel)
+            .map(|(_, s, _)| row_of(*s))
+            .or(now_min.map(row_of))
+            .unwrap_or(0);
+        let offset = if total > grid.height as u32 {
+            focus_row
+                .saturating_sub(grid.height as u32 / 3)
+                .min(total - grid.height as u32)
+        } else {
+            0
+        };
+
+        // Hour labels and the rule.
+        const LABEL_W: u16 = 6;
+        let x0 = grid.x + LABEL_W + 1;
+        let cw = grid.width.saturating_sub(LABEL_W + 1);
+        for r in 0..grid.height {
+            let abs = offset + r as u32;
+            if abs >= total {
+                break;
+            }
+            let text = if abs.is_multiple_of(rph) {
+                format!(" {:02}:00", first + abs / rph)
+            } else {
+                String::new()
+            };
+            buf.set_string(grid.x, grid.y + r, format!("{text:<6}"), label);
+            buf.set_string(
+                grid.x + LABEL_W,
+                grid.y + r,
+                "│",
+                Style::new().fg(Color::Indexed(240)),
+            );
+        }
+
+        // Lanes for overlapping events. Events are grouped into clusters that
+        // overlap each other; only a cluster is split into lanes, so an event
+        // that overlaps nothing keeps the full width. (Items are sorted by
+        // start, so a cluster ends where nothing running reaches the next.)
+        let mut lane_of = vec![0usize; spans_min.len()];
+        let mut lanes_of = vec![1usize; spans_min.len()];
+        let mut cluster: Vec<usize> = Vec::new();
+        let mut lane_end: Vec<u32> = Vec::new();
+        let mut cluster_end = 0u32;
+        let close = |cluster: &mut Vec<usize>, lanes: usize, lanes_of: &mut Vec<usize>| {
+            for k in cluster.drain(..) {
+                lanes_of[k] = lanes.max(1);
+            }
+        };
+        for (k, &(_, s, e)) in spans_min.iter().enumerate() {
+            let (srow, erow) = (row_of(s), row_of(e).max(row_of(s) + 1));
+            if !cluster.is_empty() && srow >= cluster_end {
+                close(&mut cluster, lane_end.len(), &mut lanes_of);
+                lane_end.clear();
+            }
+            match lane_end.iter().position(|end| *end <= srow) {
+                Some(l) => {
+                    lane_of[k] = l;
+                    lane_end[l] = erow;
+                }
+                None => {
+                    lane_of[k] = lane_end.len();
+                    lane_end.push(erow);
+                }
+            }
+            cluster_end = if cluster.is_empty() {
+                erow
+            } else {
+                cluster_end.max(erow)
+            };
+            cluster.push(k);
+        }
+        close(&mut cluster, lane_end.len(), &mut lanes_of);
+        let mut occupied = vec![vec![false; cw as usize]; grid.height as usize];
+
+        for (k, &(idx, s, e)) in spans_min.iter().enumerate() {
+            let inst = &app.day_items[idx];
+            let selected = idx == app.appt_sel;
+            let (srow, erow) = (row_of(s), row_of(e).max(row_of(s) + 1));
+            let lanes = lanes_of[k] as u16;
+            let lane_w = (cw / lanes).max(4);
+            let x = x0 + lane_of[k] as u16 * lane_w;
+            let w = if lane_of[k] as u16 + 1 == lanes {
+                x0 + cw - x
+            } else {
+                lane_w - 1
+            };
+            let start = inst.start.instant(home);
+            let end = inst.end.instant(home);
+            let past = is_today && end <= now;
+            let (title, rest) = split_title(app, inst);
+            let bg = if selected { sel_bg } else { BLOCK_BG };
+            let text_fg = if past {
+                Color::Indexed(244)
+            } else {
+                Color::Reset
+            };
+            let times = format!("{}–{}", start.format("%H:%M"), end.format("%H:%M"));
+            for (n, abs) in (srow..erow).enumerate() {
+                let Some(r) = abs.checked_sub(offset).filter(|r| *r < grid.height as u32) else {
+                    continue;
                 };
-                let mut spans = vec![
-                    Span::styled(format!(" {lead} "), cal_style(app, inst.calendar)),
-                    summary,
-                ];
-                if let TimeRange::Due(Some(t)) = &range {
-                    spans.push(Span::raw(format!(" (due {t})")).dark_gray());
+                let ry = grid.y + r as u16;
+                let mut spans = vec![Span::styled("▌", cal_style(app, inst.calendar))];
+                match n {
+                    0 => {
+                        spans.push(Span::styled(
+                            format!(" {title}"),
+                            Style::new().fg(text_fg).add_modifier(Modifier::BOLD),
+                        ));
+                        spans.push(Span::raw(format!("  {times}")).fg(Color::Indexed(246)));
+                        if erow - srow == 1 {
+                            spans.push(Span::raw("  "));
+                            spans.extend(details(app, inst, &rest));
+                        }
+                    }
+                    1 => {
+                        spans.push(Span::raw(" "));
+                        spans.extend(details(app, inst, &rest));
+                    }
+                    _ => {}
                 }
-                spans.push(tag);
-                lines.push(Line::from(spans));
-            }
-            _ => {
-                if !timed_started && idx > 0 {
-                    lines.push(Line::from(" ─────").dark_gray());
+                if past {
+                    for sp in spans.iter_mut().skip(1) {
+                        sp.style = sp.style.fg(Color::Indexed(244));
+                    }
                 }
-                timed_started = true;
-                lines.push(Line::from(vec![
-                    Span::styled(format!(" {bullet} "), cal_style(app, inst.calendar)),
-                    Span::raw(range.arrow()),
-                    Span::raw(format!(" {flags}")).fg(Color::Indexed(246)),
-                ]));
-                let mut spans = vec![Span::raw("   "), summary];
-                if let Some(loc) = &inst.location {
-                    spans.push(Span::raw(format!(" · {loc}")).fg(Color::Indexed(250)));
+                put(buf, x, ry, w, Line::from(spans), Some(bg));
+                for c in (x - x0)..(x - x0 + w) {
+                    if let Some(cell) = occupied[r as usize].get_mut(c as usize) {
+                        *cell = true;
+                    }
                 }
-                spans.push(tag);
-                lines.push(Line::from(spans));
+                hits.push((Rect::new(x, ry, w, 1), Hit::Appointment(idx)));
             }
         }
-        if selected {
-            sel_rows = Some((start_row, lines.len() - 1));
-        }
-        item_rows.push((start_row, lines.len() - 1));
-    }
 
-    if let Some((a, b)) = sel_rows {
-        for line in &mut lines[a..=b] {
-            *line = highlight_row(std::mem::take(line), inner.width, focused);
-        }
-    }
-    let (lines, offset) = scrolled(lines, sel_rows, inner.height as usize);
-    for (i, (a, b)) in item_rows.into_iter().enumerate() {
-        for row in a..=b {
-            if let Some(y) = screen_row(inner, row, offset) {
-                app.hits
-                    .push((Rect::new(inner.x, y, inner.width, 1), Hit::Appointment(i)));
+        // The "now" line through the free space, and the time in the margin.
+        if let Some(n) = now_min {
+            if let Some(r) = row_of(n)
+                .checked_sub(offset)
+                .filter(|r| *r < grid.height as u32)
+            {
+                let ry = grid.y + r as u16;
+                let accent = Style::new().fg(NOW);
+                buf.set_string(
+                    grid.x,
+                    ry,
+                    format!(" {:<5}", now.format("%H:%M")),
+                    accent.bold(),
+                );
+                buf.set_string(grid.x + LABEL_W, ry, "┼", accent);
+                for c in 0..cw {
+                    if !occupied[r as usize][c as usize] {
+                        buf.set_string(x0 + c, ry, "─", accent);
+                    }
+                }
             }
         }
     }
-    f.render_widget(Paragraph::new(lines), inner);
+    app.hits.extend(hits);
 }
 
 fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
@@ -561,7 +824,7 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                         Span::raw("  "),
                         Span::styled(when, colour),
                         Span::raw(" "),
-                        Span::styled(ellipsize(&i.summary, title_w), title_style),
+                        Span::styled(ellipsize(&split_title(app, i).0, title_w), title_style),
                     ]));
                 }
             }

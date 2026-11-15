@@ -1,24 +1,24 @@
- Appointments · today                                                                                         
- Monday, November 16, 2026                                                                                    
-                                                                                                              
- ○ 08:15 -> 10:00 *                                                                                           
-   Linear Algebra, lecture · Hall A  [University]                                                             
- ● 12:00 -> 13:00                                                                                             
-   Lunch with Anna · Café Lisa  [personal]                                                                    
- ● 18:30 -> 20:00 *                                                                                           
-   Climbing  [personal]                                                                                       
-                                                                                                              
-                                                                                                              
-                                                                                                              
-                                                                                                              
-                                                                                                              
-                                                                                                              
-                                                                                                              
-                                                                                                              
-                                                                                                              
-                                                                                                              
-                                                                                                              
-                                                                                                              
+ Monday 16 November · today                                                                                   
+ 04:00│                                                                                                       
+ 05:00│                                                                                                       
+ 06:00│                                                                                                       
+ 07:00│                                                                                                       
+ 08:00│▌ Linear Algebra  08:15–10:00                                                                          
+ 09:00│▌ Hall A · lecture ↻  University                                                                       
+ 10:00│                                                                                                       
+ 11:32┼───────────────────────────────────────────────────────────────────────────────────────────────────────
+ 12:00│▌ Lunch with Anna  12:00–13:00  Café Lisa  personal                                                    
+ 13:00│                                                                                                       
+ 14:00│                                                                                                       
+ 15:00│                                                                                                       
+ 16:00│                                                                                                       
+ 17:00│                                                                                                       
+ 18:00│▌ Climbing  18:30–20:00                                                                                
+ 19:00│▌ ↻  personal                                                                                          
+ 20:00│                                                                                                       
+ 21:00│                                                                                                       
+ 22:00│                                                                                                       
+ 23:00│                                                                                                       
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
                                                      Todo                                                     
  1. Pay rent 18 Nov                                                                                           

@@ -230,9 +230,9 @@ mod tests {
         let mut app = app();
         let screen = render(&mut app);
         for want in [
-            "Monday, November 16, 2026",
-            "08:15 -> 10:00",
-            "Linear Algebra, lecture · Hall A",
+            "Monday 16 November · today",
+            "Linear Algebra  08:15–10:00",
+            "Hall A · lecture ↻  University",
             "Lunch with Anna",
             "November 2026",
             "Pay rent",
@@ -311,8 +311,8 @@ mod tests {
         key(&mut app, KeyCode::Enter);
         assert!(app.popup.is_none(), "form closed");
         let screen = render(&mut app);
-        assert!(screen.contains("14:00 -> 14:45"), "{screen}");
-        assert!(screen.contains("Dentist  [personal]"), "{screen}");
+        assert!(screen.contains("Dentist  14:00–14:45"), "{screen}");
+        assert!(screen.contains("personal"), "{screen}");
         assert!(screen.contains("Added"), "{screen}");
     }
 
@@ -353,7 +353,7 @@ mod tests {
         press(&mut app, 'l');
         press(&mut app, 'l');
         let wed = render(&mut app);
-        assert!(wed.contains("Climbing  [personal]"), "{wed}");
+        assert!(wed.contains("Climbing  18:30–20:00"), "{wed}");
         assert!(!wed.contains("Climbing with Sam"), "{wed}");
     }
 
@@ -614,7 +614,7 @@ mod tests {
             (app.date, app.focus),
             (day(11, 20), layout::PanelKind::Appointments)
         );
-        assert!(render(&mut app).contains("Friday, November 20, 2026"));
+        assert!(render(&mut app).contains("Friday 20 November 2026"));
     }
 
     #[test]
@@ -802,12 +802,12 @@ mod tests {
         ));
         let screen = render(&mut app);
         assert!(
-            screen.contains("Monday, November 16, 2026   ☁ cloudy, 4° now (2°–6°)"),
+            screen.contains("Monday 16 November · today               ☁ cloudy, 4° now (2°–6°)"),
             "{screen}"
         );
         snapshot::assert_snapshot("tui_weather", &screen);
         press(&mut app, 'l');
-        assert!(render(&mut app).contains("Tuesday, November 17, 2026   ☂ rain 85%, 2°–5°"));
+        assert!(render(&mut app).contains("☂ rain 85%, 2°–5°"));
         // Beyond the forecast: just the date.
         press(&mut app, ']');
         assert!(!render(&mut app).contains("°–"));
@@ -820,7 +820,7 @@ mod tests {
         let mut term = Terminal::new(TestBackend::new(110, 32)).unwrap();
         term.draw(|f| ui::draw(f, &mut app)).unwrap();
         let buf = term.backend().buffer();
-        // Find "Lunch with Anna" and the "[personal]" tag after it.
+        // Find "Lunch with Anna" and the calendar tag after it.
         let find = |needle: &str| {
             for y in 0..buf.area.height {
                 let row: String = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
@@ -838,8 +838,42 @@ mod tests {
             Color::Reset,
             "normal text colour, not the calendar's"
         );
-        let tag = find("[personal]");
+        let tag = find("personal");
         assert_ne!(tag.fg, Color::Reset, "tag carries the calendar colour");
+    }
+
+    #[test]
+    fn overlapping_events_side_by_side() {
+        let (_dir, mut app) = writable_app();
+        // Overlaps lunch (12:00–13:00).
+        press(&mut app, 'a');
+        typ(&mut app, "Call");
+        key(&mut app, KeyCode::Tab);
+        key(&mut app, KeyCode::Tab);
+        typ(&mut app, "12:30");
+        key(&mut app, KeyCode::Enter);
+        let screen = render(&mut app);
+        let row = screen
+            .lines()
+            .find(|l| l.contains("Call  12:30"))
+            .expect("call shown");
+        assert!(
+            row.contains("Café Lisa"),
+            "same row, separate lanes:\n{screen}"
+        );
+        // Events that overlap nothing keep the full width.
+        assert!(
+            screen.contains("Hall A · lecture ↻  University"),
+            "{screen}"
+        );
+        // Both are clickable.
+        assert!(
+            app.hits
+                .iter()
+                .filter(|(_, h)| matches!(h, app::Hit::Appointment(_)))
+                .count()
+                >= 4
+        );
     }
 
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`
