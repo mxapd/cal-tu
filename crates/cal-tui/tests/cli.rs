@@ -29,6 +29,10 @@ struct Out {
 }
 
 fn run_with(config: &str, args: &[&str]) -> Out {
+    run_in(&fixtures(), config, args)
+}
+
+fn run_in(calendars: &Path, config: &str, args: &[&str]) -> Out {
     let dir = tempfile::tempdir().unwrap();
     let cfg = dir.path().join("config.toml");
     std::fs::write(&cfg, config).unwrap();
@@ -36,7 +40,7 @@ fn run_with(config: &str, args: &[&str]) -> Out {
         .arg("--config")
         .arg(&cfg)
         .arg("--calendars-dir")
-        .arg(fixtures())
+        .arg(calendars)
         .arg("--now")
         .arg(NOW)
         .args(args)
@@ -49,7 +53,7 @@ fn run_with(config: &str, args: &[&str]) -> Out {
         // Paths in messages differ per machine; keep only file names.
         stderr: String::from_utf8(out.stderr)
             .unwrap()
-            .replace(&fixtures().display().to_string(), "<fixtures>")
+            .replace(&calendars.display().to_string(), "<calendars>")
             .replace(&cfg.display().to_string(), "<config>"),
     }
 }
@@ -163,6 +167,180 @@ fn unknown_config_key_is_rejected() {
     assert_ne!(out.status, 0);
     assert!(
         out.stderr.contains("unknown field `colour`"),
+        "{}",
+        out.stderr
+    );
+}
+
+// --- commands that write --------------------------------------------------------
+
+/// A writable copy of the fixture calendars.
+fn writable_copy() -> tempfile::TempDir {
+    fn copy(from: &Path, to: &Path) {
+        for e in std::fs::read_dir(from).unwrap() {
+            let e = e.unwrap();
+            let target = to.join(e.file_name());
+            if e.path().is_dir() {
+                std::fs::create_dir_all(&target).unwrap();
+                copy(&e.path(), &target);
+            } else {
+                std::fs::copy(e.path(), &target).unwrap();
+            }
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    copy(&fixtures(), dir.path());
+    dir
+}
+
+fn count_ics(dir: &Path) -> usize {
+    std::fs::read_dir(dir)
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .path()
+                .extension()
+                .is_some_and(|x| x == "ics")
+        })
+        .count()
+}
+
+#[test]
+fn add_event_and_see_it_in_the_agenda() {
+    let cals = writable_copy();
+    let out = run_in(
+        cals.path(),
+        CONFIG,
+        &[
+            "add",
+            "Dentist",
+            "fri",
+            "14:00",
+            "1h",
+            "-l",
+            "Main St 1",
+            "-r",
+            "15m",
+        ],
+    );
+    assert_eq!(out.status, 0, "{}", out.stderr);
+    assert_eq!(
+        out.stdout,
+        "Added: Fri 20 Nov 2026 14:00-15:00 Dentist · Main St 1  [personal], reminder 15m before\n"
+    );
+    let out = run_in(
+        cals.path(),
+        CONFIG,
+        &["agenda", "--from", "2026-11-20", "--days", "1"],
+    );
+    assert!(
+        out.stdout
+            .contains("14:00-15:00  Dentist · Main St 1  [personal]"),
+        "{}",
+        out.stdout
+    );
+}
+
+#[test]
+fn add_all_day_repeating_and_dry_run() {
+    let cals = writable_copy();
+    let before = count_ics(&cals.path().join("personal"));
+    let out = run_in(
+        cals.path(),
+        CONFIG,
+        &["add", "-n", "Conference", "12-01", "3d"],
+    );
+    assert_eq!(
+        out.stdout,
+        "Would add: Tue 01 Dec – Thu 03 Dec 2026 Conference  [personal]\n"
+    );
+    assert_eq!(
+        count_ics(&cals.path().join("personal")),
+        before,
+        "dry run writes nothing"
+    );
+
+    let out = run_in(
+        cals.path(),
+        CONFIG,
+        &["add", "Gym", "tue", "7:00", "--repeat", "weekly"],
+    );
+    assert_eq!(out.status, 0, "{}", out.stderr);
+    assert!(out.stdout.contains("repeats weekly"), "{}", out.stdout);
+    let out = run_in(
+        cals.path(),
+        CONFIG,
+        &["agenda", "--from", "2026-12-01", "--days", "1"],
+    );
+    assert!(out.stdout.contains("07:00-08:00  Gym"), "{}", out.stdout);
+}
+
+#[test]
+fn add_to_read_only_calendar_fails() {
+    let cals = writable_copy();
+    let out = run_in(cals.path(), CONFIG, &["add", "Party", "fri", "-c", "uni"]);
+    assert_ne!(out.status, 0);
+    assert!(
+        out.stderr.contains("calendar 'University' is read-only"),
+        "{}",
+        out.stderr
+    );
+    assert_eq!(count_ics(&cals.path().join("uni")), 4);
+}
+
+#[test]
+fn add_uses_default_calendar_from_config() {
+    let cals = writable_copy();
+    std::fs::create_dir(cals.path().join("work")).unwrap();
+    // Top-level keys go before the first table.
+    let config = format!("default_calendar = \"work\"\n{CONFIG}");
+    let out = run_in(cals.path(), &config, &["add", "Standup", "9:00"]);
+    assert_eq!(out.status, 0, "{}", out.stderr);
+    assert!(out.stdout.contains("[work]"), "{}", out.stdout);
+    assert_eq!(count_ics(&cals.path().join("work")), 1);
+}
+
+#[test]
+fn todo_add_done_undone() {
+    let cals = writable_copy();
+    let out = run_in(
+        cals.path(),
+        CONFIG,
+        &["todo", "add", "Buy", "milk", "--due", "tomorrow", "-p", "2"],
+    );
+    assert_eq!(out.status, 0, "{}", out.stderr);
+    assert_eq!(
+        out.stdout,
+        "Added todo: Buy milk (priority 2), due Tue 17 Nov 2026  [personal]\n"
+    );
+
+    let list = run_in(cals.path(), CONFIG, &["todo"]).stdout;
+    assert!(list.contains("[ ] 2 Buy milk  (due Tue 17 Nov)"), "{list}");
+
+    let out = run_in(cals.path(), CONFIG, &["todo", "done", "milk"]);
+    assert_eq!(out.stdout, "Done: Buy milk\n", "{}", out.stderr);
+    assert!(!run_in(cals.path(), CONFIG, &["todo"])
+        .stdout
+        .contains("Buy milk"));
+
+    let out = run_in(cals.path(), CONFIG, &["todo", "undone", "buy milk"]);
+    assert_eq!(out.stdout, "Not done: Buy milk\n", "{}", out.stderr);
+    assert!(run_in(cals.path(), CONFIG, &["todo"])
+        .stdout
+        .contains("Buy milk"));
+}
+
+#[test]
+fn todo_done_needs_a_unique_match() {
+    let cals = writable_copy();
+    run_in(cals.path(), CONFIG, &["todo", "add", "Fix", "car"]);
+    let out = run_in(cals.path(), CONFIG, &["todo", "done", "fix"]);
+    assert_ne!(out.status, 0);
+    assert!(out.stderr.contains("matches 2 todos"), "{}", out.stderr);
+    let out = run_in(cals.path(), CONFIG, &["todo", "done", "nothing like this"]);
+    assert!(
+        out.stderr.contains("no open todo matches"),
         "{}",
         out.stderr
     );

@@ -52,7 +52,7 @@ fn moment_ge(a: &Moment, b: &Moment, home: Tz) -> bool {
     a.instant(home) >= b.instant(home)
 }
 
-fn duration_between(start: &Moment, end: &Moment, home: Tz) -> Duration {
+pub(crate) fn duration_between(start: &Moment, end: &Moment, home: Tz) -> Duration {
     match (start, end) {
         (Moment::Date(s), Moment::Date(e)) => *e - *s,
         _ => end.instant(home) - start.instant(home),
@@ -290,4 +290,10 @@ fn until_to_utc(value: &str, dtstart: &Moment, home: Tz) -> Result<DateTime<chro
         }
         Moment::DateTime(dt) => dt.with_timezone(&chrono::Utc),
     })
+}
+
+/// Check that an RRULE value can be expanded from `dtstart`.
+pub fn check_rrule(rule: &str, dtstart: &Moment, home: Tz) -> Result<(), String> {
+    let from = dtstart.instant(home);
+    expand_rrule(rule, dtstart, from, from + Duration::days(1), home).map(|_| ())
 }

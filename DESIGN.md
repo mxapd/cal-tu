@@ -101,6 +101,26 @@ it), `rrule`, `chrono` + `chrono-tz`, `ratatui` + `crossterm`, `clap`,
 - **Test heavily:** daylight-saving transitions, all-day vs. timed items,
   overrides that move an instance to another day, and `UNTIL` vs. `COUNT`.
 
+### Editing rules as implemented
+
+- Files with syntax problems are shown but never rewritten (the lenient parser
+  may have skipped lines). The edit is refused with the reason.
+- Changes touch only the edited properties. `DTSTAMP`, `LAST-MODIFIED` and
+  `SEQUENCE` are updated. A `VTIMEZONE` is added for IANA `TZID`s that lack
+  one, so other clients understand the times. Existing `TZID`s (including
+  Windows names) and floating/UTC forms are kept.
+- Whole-series time changes move the series by the wall-clock difference of
+  the occurrence being edited (so DST does not shift it). `EXDATE`s and
+  override `RECURRENCE-ID`s move along; overrides the user moved keep their
+  own time.
+- Moving a series to another *day* when its rule pins days (`BYDAY`,
+  `BYMONTHDAY`, …) is refused unless the rule is changed in the same edit.
+- A series title/location/notes change also updates overrides that still had
+  the old value.
+- "Does not repeat" keeps the occurrence being viewed and drops exceptions.
+- Notes are edited in the form on one line (`\\n` = new line). Editing them in
+  `$EDITOR` is still to do.
+
 ## Todos
 
 - Stored as `VTODO`. Fields: `SUMMARY`, `PRIORITY` (1–9, same as calcurse; 0 =
@@ -242,12 +262,12 @@ module (`accounts.calendar` + `services.vdirsyncer`).
 
 ## Milestones
 
-1. **Core read path:** read vdirs leniently, expand recurrences with overrides
+1. *(done)* **Core read path:** read vdirs leniently, expand recurrences with overrides
    and time zones, and make `agenda`, `today` and `next` work against a real
    Radicale vdir and the university feed. Tests use fixture `.ics` files.
-2. **TUI (read-only):** the classic layout, navigation, calendar colours and
+2. *(done)* **TUI (read-only):** the classic layout, navigation, calendar colours and
    visibility toggles.
-3. **Editing:** add, edit and delete events and todos, with series vs.
+3. *(done)* **Editing:** add, edit and delete events and todos, with series vs.
    occurrence scope, atomic writes and conflict detection. Includes the CLI
    `add` and `todo` commands.
 4. **Notifications:** the `notify` daemon and a systemd unit.

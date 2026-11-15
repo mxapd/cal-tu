@@ -4,11 +4,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-use cal_core::{Config, Instance, Kind, Store, Todo, Warning};
+use cal_core::{Config, EditError, Instance, Kind, Scope, Store, Todo, Warning};
 use chrono::{DateTime, Datelike, Duration, Months, NaiveDate, Utc};
 use chrono_tz::Tz;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::form::{Form, Submit};
 use super::layout::{Node, PanelKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,7 +18,15 @@ pub enum CalView {
     Week,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// An edit or delete waiting for the user to pick a scope or confirm.
+#[derive(Debug, Clone)]
+pub enum Pending {
+    Edit(Instance),
+    Delete(Instance),
+    DeleteTodo(Todo),
+}
+
+#[derive(Debug, Clone)]
 pub enum Popup {
     Help,
     /// Details of the selected appointment or todo.
@@ -32,6 +41,12 @@ pub enum Popup {
     Warnings {
         scroll: usize,
     },
+    /// Add/edit form.
+    Form(Box<Form>),
+    /// "This occurrence or all?" for repeating events.
+    Scope(Pending),
+    /// "Delete …? y/n".
+    Confirm(Pending),
 }
 
 /// What the run loop has to do after a key press.
@@ -317,12 +332,235 @@ impl App {
                     self.popup = Some(Popup::Details);
                 }
             }
-            KeyCode::Char('a' | 'e' | 'd') => {
-                self.message = Some("Editing comes in milestone 3".into());
-            }
+            KeyCode::Char('a') => self.start_add(),
+            KeyCode::Char('e') => self.start_edit(),
+            KeyCode::Char('d') => self.start_delete(),
+            KeyCode::Char('x') | KeyCode::Char(' ') => self.toggle_todo_done(),
+            KeyCode::Char('+') => self.bump_priority(true),
+            KeyCode::Char('-') => self.bump_priority(false),
             _ => {}
         }
         Action::None
+    }
+
+    // --- editing -------------------------------------------------------------
+
+    /// The selected item as a todo: from the todo panel, or a due todo in the
+    /// appointments panel.
+    fn target_todo(&self) -> Option<Todo> {
+        match self.focus {
+            PanelKind::Todo => self.selected_todo().cloned(),
+            PanelKind::Appointments => {
+                let i = self.selected_instance()?;
+                (i.kind == Kind::Todo)
+                    .then(|| {
+                        self.store
+                            .todos()
+                            .into_iter()
+                            .find(|t| t.object == i.object)
+                    })
+                    .flatten()
+            }
+            PanelKind::Calendar => None,
+        }
+    }
+
+    /// The selected event occurrence (appointments panel).
+    fn target_event(&self) -> Option<Instance> {
+        (self.focus == PanelKind::Appointments)
+            .then(|| self.selected_instance().cloned())
+            .flatten()
+            .filter(|i| i.kind == Kind::Event)
+    }
+
+    /// Check the item can be edited; sets a message if not.
+    fn editable(&mut self, object: usize) -> bool {
+        match self.store.can_edit(object) {
+            Ok(()) => true,
+            Err(e) => {
+                self.message = Some(format!("Cannot edit: {e:#}"));
+                false
+            }
+        }
+    }
+
+    fn default_calendar(&self) -> Option<usize> {
+        self.config
+            .default_calendar
+            .as_deref()
+            .and_then(|c| self.store.calendar_index(c))
+    }
+
+    fn start_add(&mut self) {
+        if self.store.writable_calendars().is_empty() {
+            self.message =
+                Some("No writable calendar: create a folder in the calendars directory".into());
+            return;
+        }
+        let form = if self.focus == PanelKind::Todo {
+            Form::new_todo(&self.store, self.default_calendar())
+        } else {
+            Form::new_event(&self.store, self.date, self.default_calendar())
+        };
+        self.popup = Some(Popup::Form(Box::new(form)));
+    }
+
+    fn start_edit(&mut self) {
+        if let Some(t) = self.target_todo() {
+            if self.editable(t.object) {
+                self.popup = Some(Popup::Form(Box::new(Form::edit_todo(&self.store, &t))));
+            }
+        } else if let Some(i) = self.target_event() {
+            if !self.editable(i.object) {
+                return;
+            }
+            self.popup = Some(if i.recurrence_id.is_some() {
+                Popup::Scope(Pending::Edit(i))
+            } else {
+                Popup::Form(Box::new(Form::edit_event(&self.store, &i, Scope::All)))
+            });
+        }
+    }
+
+    fn start_delete(&mut self) {
+        if let Some(t) = self.target_todo() {
+            if self.editable(t.object) {
+                self.popup = Some(Popup::Confirm(Pending::DeleteTodo(t)));
+            }
+        } else if let Some(i) = self.target_event() {
+            if !self.editable(i.object) {
+                return;
+            }
+            self.popup = Some(if i.recurrence_id.is_some() {
+                Popup::Scope(Pending::Delete(i))
+            } else {
+                Popup::Confirm(Pending::Delete(i))
+            });
+        }
+    }
+
+    /// Continue an edit/delete after the scope was chosen or confirmed.
+    fn run_pending(&mut self, pending: Pending, scope: Scope) {
+        match pending {
+            Pending::Edit(i) => {
+                self.popup = Some(Popup::Form(Box::new(Form::edit_event(
+                    &self.store,
+                    &i,
+                    scope,
+                ))));
+            }
+            Pending::Delete(i) => {
+                let what = match scope {
+                    Scope::All if i.recurrence_id.is_some() => "Deleted all occurrences",
+                    Scope::All => "Deleted",
+                    Scope::Occurrence(_) => "Deleted this occurrence",
+                };
+                let _ = self.write(what, |s, now| s.delete(i.object, scope, now));
+            }
+            Pending::DeleteTodo(t) => {
+                let _ = self.write("Deleted todo", |s, now| s.delete(t.object, Scope::All, now));
+            }
+        }
+    }
+
+    fn toggle_todo_done(&mut self) {
+        let Some(t) = self.target_todo() else { return };
+        if !self.editable(t.object) {
+            return;
+        }
+        let done = !t.completed;
+        let msg = if done {
+            "Marked done"
+        } else {
+            "Marked not done"
+        };
+        let _ = self.write(msg, |s, now| s.set_todo_completed(t.object, done, now));
+    }
+
+    /// `+` raises the priority (towards 1), `-` lowers it (towards none).
+    fn bump_priority(&mut self, up: bool) {
+        let Some(t) = self.target_todo() else { return };
+        if !self.editable(t.object) {
+            return;
+        }
+        let p = match (up, t.priority) {
+            (true, 0) => 9,
+            (true, p) => p.saturating_sub(1).max(1),
+            (false, 0) | (false, 9) => 0,
+            (false, p) => p + 1,
+        };
+        if p == t.priority {
+            return;
+        }
+        let edit = cal_core::TodoEdit {
+            priority: Some(p),
+            ..Default::default()
+        };
+        let msg = if p == 0 {
+            "Priority: none".to_string()
+        } else {
+            format!("Priority: {p}")
+        };
+        let _ = self.write(&msg, |s, now| s.update_todo(t.object, &edit, now));
+    }
+
+    /// Save a submitted form. On error the form stays open with the message.
+    fn submit(&mut self, form: &Form) -> Result<(), String> {
+        match form.submit(self.now())? {
+            Submit::Nothing => {
+                self.message = Some("No changes".into());
+                Ok(())
+            }
+            Submit::NewEvent(cal, ev) => {
+                self.write("Added", |s, now| s.create_event(cal, &ev, now).map(|_| ()))
+            }
+            Submit::EditEvent {
+                object,
+                scope,
+                seen_start,
+                edit,
+            } => self.write("Saved", |s, now| {
+                s.update_event(object, scope, seen_start, &edit, now)
+            }),
+            Submit::NewTodo(cal, t) => self.write("Added todo", |s, now| {
+                s.create_todo(cal, &t, now).map(|_| ())
+            }),
+            Submit::EditTodo { object, edit } => {
+                self.write("Saved", |s, now| s.update_todo(object, &edit, now))
+            }
+        }
+    }
+
+    /// Run a store change, then reload. A conflict (the file changed on disk)
+    /// reloads and asks the user to retry; other errors are returned.
+    fn write(
+        &mut self,
+        ok: &str,
+        f: impl FnOnce(&Store, DateTime<Utc>) -> anyhow::Result<()>,
+    ) -> Result<(), String> {
+        let now = self.now().with_timezone(&Utc);
+        match f(&self.store, now) {
+            Ok(()) => {
+                self.reload();
+                self.message = Some(ok.to_string());
+                Ok(())
+            }
+            Err(e) => match e.downcast_ref::<EditError>() {
+                Some(EditError::Conflict(_)) => {
+                    self.reload();
+                    self.message = Some(
+                        "The item changed on disk (sync?). Reloaded; please make your change again."
+                            .into(),
+                    );
+                    Ok(())
+                }
+                _ => {
+                    let msg = format!("{e:#}");
+                    self.message = Some(msg.clone());
+                    Err(msg)
+                }
+            },
+        }
     }
 
     fn cycle_focus(&mut self, dir: i32) {
@@ -348,7 +586,7 @@ impl App {
             return;
         };
         let close = matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
-            && !matches!(popup, Popup::Goto { .. });
+            && !matches!(popup, Popup::Goto { .. } | Popup::Form(_));
         if close || (key.code == KeyCode::Esc) {
             if let Popup::Calendars { .. } = popup {
                 self.apply_visibility();
@@ -357,6 +595,43 @@ impl App {
             return;
         }
         self.popup = Some(match popup {
+            Popup::Form(mut form) => {
+                let ctrl_s =
+                    key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s');
+                if key.code == KeyCode::Enter || ctrl_s {
+                    match self.submit(&form) {
+                        Ok(()) => return,
+                        Err(e) => form.error = Some(e),
+                    }
+                } else {
+                    form.handle_key(key);
+                }
+                Popup::Form(form)
+            }
+            Popup::Scope(pending) => {
+                let scope = match (key.code, &pending) {
+                    (KeyCode::Char('o' | 'O'), Pending::Edit(i) | Pending::Delete(i)) => {
+                        i.recurrence_id.map(Scope::Occurrence)
+                    }
+                    (KeyCode::Char('a' | 'A'), _) => Some(Scope::All),
+                    _ => None,
+                };
+                match scope {
+                    Some(scope) => {
+                        self.run_pending(pending, scope);
+                        return;
+                    }
+                    None => Popup::Scope(pending),
+                }
+            }
+            Popup::Confirm(pending) => match key.code {
+                KeyCode::Char('y' | 'Y') => {
+                    self.run_pending(pending, Scope::All);
+                    return;
+                }
+                KeyCode::Char('n' | 'N') => return,
+                _ => Popup::Confirm(pending),
+            },
             Popup::Help | Popup::Details => {
                 if matches!(key.code, KeyCode::Enter | KeyCode::Char('?')) {
                     return;

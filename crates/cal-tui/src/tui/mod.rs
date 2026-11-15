@@ -1,6 +1,7 @@
 //! Full-screen terminal UI.
 
 mod app;
+mod form;
 mod layout;
 mod ui;
 
@@ -106,14 +107,40 @@ mod tests {
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::Terminal;
 
+    const FIXTURES: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../cal-core/tests/fixtures/calendars"
+    );
+
     fn app() -> App {
-        let dir = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../cal-core/tests/fixtures/calendars"
-        );
+        app_at(FIXTURES)
+    }
+
+    /// An app on a private, writable copy of the fixtures.
+    fn writable_app() -> (tempfile::TempDir, App) {
+        fn copy(from: &std::path::Path, to: &std::path::Path) {
+            for e in std::fs::read_dir(from).unwrap() {
+                let e = e.unwrap();
+                let target = to.join(e.file_name());
+                if e.path().is_dir() {
+                    std::fs::create_dir_all(&target).unwrap();
+                    copy(&e.path(), &target);
+                } else {
+                    std::fs::copy(e.path(), &target).unwrap();
+                }
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        copy(FIXTURES.as_ref(), dir.path());
+        let app = app_at(dir.path().to_str().unwrap());
+        (dir, app)
+    }
+
+    fn app_at(dir: &str) -> App {
         let config: Config = toml::from_str(&format!(
             r#"
             calendars_dir = "{dir}"
+            timezone = "Europe/Stockholm"
             [calendars.uni]
             read_only = true
             hide_matching = ["^Tutorial group B"]
@@ -206,6 +233,166 @@ mod tests {
         assert!(screen.contains("Climbing (moved)"));
         assert!(screen.contains("yes (part of a series)"), "{screen}");
         snapshot::assert_snapshot("tui_details_override", &screen);
+    }
+
+    fn key(app: &mut App, code: KeyCode) {
+        app.handle_key(KeyEvent::new(code, KeyModifiers::NONE));
+    }
+
+    fn typ(app: &mut App, s: &str) {
+        for c in s.chars() {
+            press(app, c);
+        }
+    }
+
+    fn clear_field(app: &mut App) {
+        app.handle_key(KeyEvent::new(KeyCode::Char('e'), KeyModifiers::CONTROL));
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+    }
+
+    #[test]
+    fn add_event_with_the_form() {
+        let (_dir, mut app) = writable_app();
+        press(&mut app, 'a');
+        typ(&mut app, "Dentist");
+        key(&mut app, KeyCode::Tab); // date: prefilled with the selected day
+        key(&mut app, KeyCode::Tab);
+        typ(&mut app, "14:00");
+        key(&mut app, KeyCode::Tab);
+        typ(&mut app, "45m");
+        snapshot::assert_snapshot("tui_form_new_event", &render(&mut app));
+        key(&mut app, KeyCode::Enter);
+        assert!(app.popup.is_none(), "form closed");
+        let screen = render(&mut app);
+        assert!(screen.contains("14:00 -> 14:45"), "{screen}");
+        assert!(screen.contains("Dentist  [personal]"), "{screen}");
+        assert!(screen.contains("Added"), "{screen}");
+    }
+
+    #[test]
+    fn form_errors_keep_the_form_open() {
+        let (_dir, mut app) = writable_app();
+        press(&mut app, 'a');
+        key(&mut app, KeyCode::Enter);
+        let screen = render(&mut app);
+        assert!(screen.contains("Title: required"), "{screen}");
+        typ(&mut app, "Thing");
+        key(&mut app, KeyCode::Tab);
+        key(&mut app, KeyCode::Tab);
+        typ(&mut app, "25:99");
+        key(&mut app, KeyCode::Enter);
+        assert!(render(&mut app).contains("Start: cannot understand '25:99'"));
+        // Typing q in a form is text, not "close".
+        press(&mut app, 'q');
+        assert!(matches!(app.popup, Some(app::Popup::Form(_))));
+        key(&mut app, KeyCode::Esc);
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn edit_one_occurrence_of_a_series() {
+        let (_dir, mut app) = writable_app();
+        // Items on Mon 16 Nov: lecture, lunch, climbing.
+        press(&mut app, 'j');
+        press(&mut app, 'j');
+        press(&mut app, 'e');
+        snapshot::assert_snapshot("tui_scope_prompt", &render(&mut app));
+        press(&mut app, 'o');
+        clear_field(&mut app);
+        typ(&mut app, "Climbing with Sam");
+        snapshot::assert_snapshot("tui_form_edit_occurrence", &render(&mut app));
+        key(&mut app, KeyCode::Enter);
+        assert!(render(&mut app).contains("Climbing with Sam"));
+        press(&mut app, 'l');
+        press(&mut app, 'l');
+        let wed = render(&mut app);
+        assert!(wed.contains("Climbing  [personal]"), "{wed}");
+        assert!(!wed.contains("Climbing with Sam"), "{wed}");
+    }
+
+    #[test]
+    fn delete_asks_first() {
+        let (_dir, mut app) = writable_app();
+        press(&mut app, 'j'); // lunch
+        press(&mut app, 'd');
+        snapshot::assert_snapshot("tui_confirm_delete", &render(&mut app));
+        press(&mut app, 'n');
+        assert!(render(&mut app).contains("Lunch with Anna"));
+        press(&mut app, 'd');
+        press(&mut app, 'y');
+        let screen = render(&mut app);
+        assert!(!screen.contains("Lunch with Anna"), "{screen}");
+        assert!(screen.contains("Deleted"));
+    }
+
+    #[test]
+    fn delete_one_occurrence() {
+        let (_dir, mut app) = writable_app();
+        press(&mut app, 'j');
+        press(&mut app, 'j'); // climbing
+        press(&mut app, 'd');
+        press(&mut app, 'o');
+        assert!(!render(&mut app).contains("Climbing"));
+        press(&mut app, 'l');
+        press(&mut app, 'l');
+        assert!(render(&mut app).contains("Climbing"), "next one remains");
+    }
+
+    #[test]
+    fn read_only_items_cannot_be_edited() {
+        let (_dir, mut app) = writable_app();
+        press(&mut app, 'e'); // lecture, University (read-only)
+        assert!(app.popup.is_none());
+        let screen = render(&mut app);
+        assert!(
+            screen.contains("Cannot edit: calendar 'University' is read-only"),
+            "{screen}"
+        );
+        press(&mut app, 'd');
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn todo_keys() {
+        let (_dir, mut app) = writable_app();
+        key(&mut app, KeyCode::Tab);
+        key(&mut app, KeyCode::Tab);
+        assert_eq!(app.focus, layout::PanelKind::Todo);
+        press(&mut app, 'x'); // Pay rent done
+        let screen = render(&mut app);
+        assert!(!screen.contains("Pay rent"), "{screen}");
+        press(&mut app, '+'); // Fix bike 5 -> 4
+        assert!(render(&mut app).contains("4. Fix bike"));
+        press(&mut app, 'a');
+        typ(&mut app, "Buy milk");
+        key(&mut app, KeyCode::Tab);
+        typ(&mut app, "tomorrow");
+        key(&mut app, KeyCode::Tab);
+        clear_field(&mut app);
+        typ(&mut app, "2");
+        key(&mut app, KeyCode::Enter);
+        let screen = render(&mut app);
+        assert!(screen.contains("2. Buy milk 17 Nov"), "{screen}");
+    }
+
+    #[test]
+    fn conflict_reloads_instead_of_overwriting() {
+        let (dir, mut app) = writable_app();
+        press(&mut app, 'j'); // lunch
+        press(&mut app, 'e');
+        clear_field(&mut app);
+        typ(&mut app, "Lunch (mine)");
+        // Meanwhile a sync changes the file.
+        let path = dir.path().join("personal/lunch.ics");
+        let theirs = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("Lunch with Anna", "Lunch (theirs)");
+        std::fs::write(&path, &theirs).unwrap();
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), theirs);
+        let screen = render(&mut app);
+        assert!(screen.contains("Lunch (theirs)"), "{screen}");
+        assert!(screen.contains("changed on disk"), "{screen}");
     }
 
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`

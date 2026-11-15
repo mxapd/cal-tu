@@ -2,17 +2,20 @@
 │ Monday, November 16, 2026                                                  ││     Mon 16  ●●               │
 │                                                                            ││     Tue 17  ●                │
 │ ○ 08:15 -> 10:00 *                                                         ││     Wed 18  ●                │
-│   Linear Algebra, lecture · Hall A  [University]                           ││     Thu 19                   │
-│ ● 12:00 -> 13:00                                                           ││     Fri 20  ●                │
-│   Lunch with Ann╭───────────────────────────────── Help ─────────────────────────────────╮●                │
-│ ● 18:30 -> 20:00│ h / l, ← / →      previous / next day                                  │●                │
-│   Climbing  [per│ H / L             previous / next week                                 │─────────────────╯
-│                 │ [ / ]             previous / next month                                │TODO ────────────╮
-│                 │ j / k, ↓ / ↑      move selection (calendar panel: week)                │18 Nov           │
-│                 │ Tab / Shift-Tab   next / previous panel                                │                 │
-│                 │ t                 go to today                                          │                 │
+│   Linear Algebra╭───────────────────────────────── Help ─────────────────────────────────╮                 │
+│ ● 12:00 -> 13:00│ h / l, ← / →      previous / next day                                  │●                │
+│   Lunch with Ann│ H / L             previous / next week                                 │●                │
+│ ● 18:30 -> 20:00│ [ / ]             previous / next month                                │●                │
+│   Climbing  [per│ j / k, ↓ / ↑      move selection (calendar panel: week)                │─────────────────╯
+│                 │ Tab / Shift-Tab   next / previous panel                                │TODO ────────────╮
+│                 │ t                 go to today                                          │18 Nov           │
 │                 │ g                 go to date (2026-12-24, 12-24, 24, +7, -7)           │                 │
 │                 │ Enter             show details of the selected item                    │                 │
+│                 │ a                 add an event (todo panel: a todo)                    │                 │
+│                 │ e                 edit the selected item                               │                 │
+│                 │ d                 delete the selected item                             │                 │
+│                 │ x, Space          todo: mark done / not done                           │                 │
+│                 │ + / -             todo: raise / lower priority                         │                 │
 │                 │ v                 switch month / week view                             │                 │
 │                 │ c                 show / hide calendars                                │                 │
 │                 │ C                 show / hide completed todos                          │                 │
@@ -23,9 +26,6 @@
 │                 │                                                                        │                 │
 │                 │ Markers           ● calendar item  ○ read-only  * repeats  > has notes │                 │
 │                 ╰────────────────────────────────────────────────────────────────────────╯                 │
-│                                                                            ││                              │
-│                                                                            ││                              │
-│                                                                            ││                              │
 │                                                                            ││                              │
 ╰────────────────────────────────────────────────────────────────────────────╯╰──────────────────────────────╯
  Mon 16 Nov 2026 │ 11:32 │ ● personal ● University │ next: Lunch with Anna in 28m │ ⚠ 3 (W)                   

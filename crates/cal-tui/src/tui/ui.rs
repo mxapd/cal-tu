@@ -8,7 +8,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-use super::app::{App, CalView, Popup};
+use super::app::{App, CalView, Pending, Popup};
+use super::form::{FieldId, Form};
 use super::layout::{Node, PanelKind};
 use crate::fmt::{humanize, parse_color, time_range, Rgb, TimeRange};
 
@@ -46,6 +47,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Some(Popup::Calendars { sel }) => draw_calendars(f, app, sel),
         Some(Popup::Goto { input, error }) => draw_goto(f, &input, error.as_deref()),
         Some(Popup::Warnings { scroll }) => draw_warnings(f, app, scroll),
+        Some(Popup::Form(form)) => draw_form(f, app, &form),
+        Some(Popup::Scope(p)) => draw_scope(f, app, &p),
+        Some(Popup::Confirm(p)) => draw_confirm(f, &p),
         None => {}
     }
 }
@@ -357,17 +361,41 @@ fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
     let hints: &[(&str, &str)] = match &app.popup {
         Some(Popup::Calendars { .. }) => &[("j/k", "Move"), ("Space", "Toggle"), ("Esc", "Close")],
         Some(Popup::Goto { .. }) => &[("Enter", "Go"), ("Esc", "Cancel")],
+        Some(Popup::Form(_)) => &[
+            ("Enter", "Save"),
+            ("Tab/↓", "Next field"),
+            ("Shift-Tab/↑", "Previous"),
+            ("Ctrl-U", "Clear"),
+            ("Esc", "Cancel"),
+        ],
+        Some(Popup::Scope(_)) => &[("o", "This occurrence"), ("a", "All"), ("Esc", "Cancel")],
+        Some(Popup::Confirm(_)) => &[("y", "Yes"), ("n", "No")],
         Some(_) => &[("Esc", "Close")],
+        // Most important first; the bar is cut at the terminal width.
+        None if app.focus == PanelKind::Todo => &[
+            ("?", "Help"),
+            ("Tab", "Panel"),
+            ("j/k", "Move"),
+            ("a", "Add"),
+            ("e", "Edit"),
+            ("d", "Delete"),
+            ("x", "Done"),
+            ("+/-", "Priority"),
+            ("C", "Show done"),
+            ("S", "Sync"),
+            ("q", "Quit"),
+        ],
         None => &[
             ("?", "Help"),
             ("Tab", "Panel"),
             ("h/l", "Day"),
             ("j/k", "Move"),
-            ("[/]", "Month"),
             ("g", "Goto"),
             ("t", "Today"),
+            ("a", "Add"),
+            ("e", "Edit"),
+            ("d", "Delete"),
             ("Enter", "View"),
-            ("c", "Calendars"),
             ("S", "Sync"),
             ("q", "Quit"),
         ],
@@ -404,6 +432,11 @@ fn draw_help(f: &mut Frame) {
         ("t", "go to today"),
         ("g", "go to date (2026-12-24, 12-24, 24, +7, -7)"),
         ("Enter", "show details of the selected item"),
+        ("a", "add an event (todo panel: a todo)"),
+        ("e", "edit the selected item"),
+        ("d", "delete the selected item"),
+        ("x, Space", "todo: mark done / not done"),
+        ("+ / -", "todo: raise / lower priority"),
         ("v", "switch month / week view"),
         ("c", "show / hide calendars"),
         ("C", "show / hide completed todos"),
@@ -607,4 +640,105 @@ fn draw_warnings(f: &mut Frame, app: &App, scroll: usize) {
             .block(popup_block("Warnings")),
         area,
     );
+}
+
+fn draw_form(f: &mut Frame, app: &App, form: &Form) {
+    const LABEL: usize = 10;
+    let mut lines = Vec::new();
+    let mut cursor = None;
+    for (i, field) in form.fields.iter().enumerate() {
+        let focused = i == form.focus;
+        let label = Span::raw(format!(" {:<LABEL$} ", field.id.label()));
+        let label = if focused {
+            label.bold().cyan()
+        } else {
+            label.dark_gray()
+        };
+        let value = if field.id == FieldId::Calendar {
+            match form.calendars.get(form.calendar) {
+                Some(&c) => Span::styled(
+                    format!("◀ {} ▶", app.store.calendars[c].name),
+                    cal_style(app, c).add_modifier(Modifier::BOLD),
+                ),
+                None => Span::raw("(no writable calendar)").red(),
+            }
+        } else {
+            if focused {
+                let before: String = field.input.text.chars().take(field.input.cursor).collect();
+                cursor = Some((i, LABEL + 2 + before.chars().count()));
+            }
+            let s = Span::raw(field.input.text.clone());
+            if focused {
+                s.bold()
+            } else {
+                s
+            }
+        };
+        lines.push(Line::from(vec![label, value]));
+    }
+    lines.push(Line::from(""));
+    let hint = form.fields[form.focus].id.hint();
+    lines.push(Line::from(format!(" {hint}")).dark_gray());
+    if let Some(e) = &form.error {
+        lines.push(Line::from(format!(" {e}")).red());
+    }
+    let area = popup_area(f, 72, lines.len() as u16 + 2);
+    f.render_widget(Clear, area);
+    f.render_widget(Paragraph::new(lines).block(popup_block(&form.title)), area);
+    if let Some((row, col)) = cursor {
+        let x = (area.x + 1 + col as u16).min(area.right().saturating_sub(2));
+        f.set_cursor_position((x, area.y + 1 + row as u16));
+    }
+}
+
+fn draw_scope(f: &mut Frame, app: &App, p: &Pending) {
+    let (verb, i) = match p {
+        Pending::Edit(i) => ("Edit", i),
+        Pending::Delete(i) => ("Delete", i),
+        Pending::DeleteTodo(_) => return,
+    };
+    let when = i
+        .start
+        .instant(app.store.home)
+        .format("%a %d %b")
+        .to_string();
+    let lines = vec![
+        Line::from(format!(" “{}” repeats.", i.summary)),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("  o ").bold().cyan(),
+            Span::raw(format!(" only this occurrence ({when})")),
+        ]),
+        Line::from(vec![
+            Span::raw("  a ").bold().cyan(),
+            Span::raw(" all occurrences"),
+        ]),
+        Line::from(vec![Span::raw("  Esc").bold().cyan(), Span::raw(" cancel")]),
+    ];
+    let area = popup_area(f, 56, lines.len() as u16 + 2);
+    f.render_widget(Clear, area);
+    f.render_widget(
+        Paragraph::new(lines).block(popup_block(&format!("{verb} repeating event"))),
+        area,
+    );
+}
+
+fn draw_confirm(f: &mut Frame, p: &Pending) {
+    let what = match p {
+        Pending::Delete(i) | Pending::Edit(i) => &i.summary,
+        Pending::DeleteTodo(t) => &t.summary,
+    };
+    let lines = vec![
+        Line::from(format!(" Delete “{what}”?")),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("  y ").bold().cyan(),
+            Span::raw(" yes    "),
+            Span::raw("n ").bold().cyan(),
+            Span::raw(" no"),
+        ]),
+    ];
+    let area = popup_area(f, 56, lines.len() as u16 + 2);
+    f.render_widget(Clear, area);
+    f.render_widget(Paragraph::new(lines).block(popup_block("Delete")), area);
 }

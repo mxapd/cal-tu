@@ -241,3 +241,76 @@ pub fn report_warnings(warnings: &[Warning], verbose: bool) {
         );
     }
 }
+
+/// When an item takes place, for confirmations: `Fri 20 Nov 2026 14:00-15:00`.
+pub fn describe_span(start: &Moment, end: &Moment, home: Tz) -> String {
+    match (start, end) {
+        (Moment::Date(s), Moment::Date(e)) => {
+            let last = *e - Duration::days(1);
+            if last <= *s {
+                format!("{} all day", s.format("%a %d %b %Y"))
+            } else {
+                format!("{} – {}", s.format("%a %d %b"), last.format("%a %d %b %Y"))
+            }
+        }
+        _ => {
+            let s = start.instant(home);
+            let e = end.instant(home);
+            if s.date_naive() == e.date_naive() {
+                format!(
+                    "{} {}-{}",
+                    s.format("%a %d %b %Y"),
+                    s.format("%H:%M"),
+                    e.format("%H:%M")
+                )
+            } else {
+                format!(
+                    "{} – {}",
+                    s.format("%a %d %b %Y %H:%M"),
+                    e.format("%a %d %b %H:%M")
+                )
+            }
+        }
+    }
+}
+
+pub fn describe_new_event(store: &Store, cal: usize, ev: &cal_core::NewEvent) -> String {
+    let mut s = format!(
+        "{} {}",
+        describe_span(&ev.start, &ev.end, store.home),
+        ev.summary
+    );
+    if let Some(l) = &ev.location {
+        s.push_str(&format!(" · {l}"));
+    }
+    s.push_str(&format!("  [{}]", store.calendars[cal].name));
+    if let Some(r) = &ev.rrule {
+        s.push_str(&format!(
+            ", repeats {}",
+            cal_core::quick::describe_repeat(Some(r))
+        ));
+    }
+    if let Some(r) = ev.reminder {
+        s.push_str(&format!(", reminder {} before", crate::fmt::humanize(r)));
+    }
+    s
+}
+
+pub fn describe_new_todo(store: &Store, cal: usize, t: &cal_core::NewTodo) -> String {
+    let mut s = t.summary.clone();
+    if t.priority > 0 {
+        s.push_str(&format!(" (priority {})", t.priority));
+    }
+    if let Some(d) = &t.due {
+        let due = match d {
+            Moment::Date(d) => d.format("%a %d %b %Y").to_string(),
+            Moment::DateTime(dt) => dt
+                .with_timezone(&store.home)
+                .format("%a %d %b %Y %H:%M")
+                .to_string(),
+        };
+        s.push_str(&format!(", due {due}"));
+    }
+    s.push_str(&format!("  [{}]", store.calendars[cal].name));
+    s
+}

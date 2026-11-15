@@ -37,4 +37,4 @@
 │                                                │
 ╰────────────────────────────────────────────────╯
  Mon 16 Nov 2026 │ 11:32 │ ● personal ● University
- ? Help  Tab Panel  h/l Day  j/k Move  [/] Month  
+ ? Help  Tab Panel  h/l Day  j/k Move  g Goto  t T

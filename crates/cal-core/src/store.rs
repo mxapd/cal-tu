@@ -1,6 +1,6 @@
 //! Reading calendars from a vdir and querying them.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, NaiveDate, NaiveTime};
@@ -107,6 +107,12 @@ pub struct Store {
     pub calendars: Vec<Calendar>,
     pub objects: Vec<Object>,
     pub warnings: Vec<Warning>,
+    /// Content hash of every file as it was loaded, to detect changes made
+    /// by others (a sync) before writing.
+    pub(crate) file_hashes: HashMap<PathBuf, u64>,
+    /// Files with syntax problems: shown, but never rewritten, because the
+    /// lenient parser may have skipped parts of them.
+    pub(crate) unsafe_files: HashMap<PathBuf, String>,
 }
 
 impl Store {
@@ -123,6 +129,8 @@ impl Store {
             calendars: Vec::new(),
             objects: Vec::new(),
             warnings: Vec::new(),
+            file_hashes: HashMap::new(),
+            unsafe_files: HashMap::new(),
         };
         let mut folders: Vec<PathBuf> = match std::fs::read_dir(dir) {
             Ok(rd) => rd
@@ -206,11 +214,26 @@ impl Store {
     }
 
     fn load_file(&mut self, cal: usize, path: &Path) {
-        let text = match std::fs::read(path) {
-            Ok(b) => String::from_utf8_lossy(&b).into_owned(),
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
             Err(e) => return self.warn(Some(path), format!("cannot read: {e}")),
         };
+        self.file_hashes
+            .insert(path.to_path_buf(), crate::fsio::content_hash(&bytes));
+        let text = match String::from_utf8(bytes) {
+            Ok(s) => s,
+            Err(e) => {
+                self.unsafe_files
+                    .insert(path.to_path_buf(), "not valid UTF-8".into());
+                String::from_utf8_lossy(e.as_bytes()).into_owned()
+            }
+        };
         let parsed = ical::parse(&text);
+        if let Some(w) = parsed.warnings.first() {
+            self.unsafe_files
+                .entry(path.to_path_buf())
+                .or_insert_with(|| format!("line {}: {}", w.line, w.message));
+        }
         for w in &parsed.warnings {
             self.warn(Some(path), format!("line {}: {}", w.line, w.message));
         }
