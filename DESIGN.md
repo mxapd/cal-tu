@@ -210,6 +210,22 @@ cal-tui notify                   # reminder daemon
 
 ## Notifications
 
+As implemented (milestone 4):
+
+- No file watcher: every 20 s the service compares a cheap fingerprint of the
+  calendar folders (`Store::fingerprint`) and reloads on change. Simpler and
+  robust across sync tools; the TUI uses the same check.
+- Reminders are computed by `Store::alarms(from, to)` in cal-core: VALARMs
+  relative to start/end, absolute triggers, `REPEAT`/`DURATION`,
+  `ACKNOWLEDGED` respected, `EMAIL`/`PROCEDURE` ignored; overrides without
+  their own alarms use the series' alarms; `default_reminder` applies to timed
+  events without alarms (not all-day ones).
+- Delivered keys are stored in `$XDG_STATE_HOME/cal-tui/notified` and pruned
+  after 3 days. Missed reminders are delivered while the event is still ahead,
+  or if at most `--catch-up` (default 10 min) old. A failed delivery (no
+  notification daemon) is retried on the next check.
+- Sinks: desktop (D-Bus via `notify-rust`), `--print`, or `--command`.
+
 - `cal-tui notify` runs as a systemd user service. It watches the vdirs (with
   `notify`), keeps an in-memory index of upcoming alarms for the next N hours,
   and sends desktop notifications through `notify-rust`.
@@ -270,7 +286,7 @@ module (`accounts.calendar` + `services.vdirsyncer`).
 3. *(done)* **Editing:** add, edit and delete events and todos, with series vs.
    occurrence scope, atomic writes and conflict detection. Includes the CLI
    `add` and `todo` commands.
-4. **Notifications:** the `notify` daemon and a systemd unit.
+4. *(done)* **Notifications:** the `notify` daemon and a systemd unit.
 5. **Layout engine:** presets, in-app rearranging, saving to the state file
    (config-defined layouts take precedence).
 6. **Packaging:** the Nix package and home-manager module exist already;

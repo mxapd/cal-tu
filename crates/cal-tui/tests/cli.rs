@@ -345,3 +345,119 @@ fn todo_done_needs_a_unique_match() {
         out.stderr
     );
 }
+
+// --- reminders --------------------------------------------------------------------
+
+/// `notify --once --print` at a given time, with its own state file.
+fn notify_once(state: &Path, now: &str, extra: &[&str]) -> Out {
+    let mut args = vec!["--now", now, "notify", "--once", "--print", "--state"];
+    let state = state.to_str().unwrap().to_string();
+    args.push(&state);
+    args.extend_from_slice(extra);
+    // --now given twice: the last one wins.
+    run(&args)
+}
+
+#[test]
+fn notify_upcoming_lists_reminders() {
+    let config = format!("{CONFIG}default_reminder = \"15m\"\n");
+    let out = run_with(&config, &["notify", "--upcoming", "8d"]);
+    assert_eq!(out.status, 0, "{}", out.stderr);
+    assert_snapshot("cli_notify_upcoming", &out.stdout);
+}
+
+#[test]
+fn notify_delivers_each_reminder_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("notified");
+    // Climbing 18:30 has a 30-minute alarm (18:00).
+    let out = notify_once(&state, "2026-11-16T18:02", &[]);
+    assert_eq!(out.status, 0, "{}", out.stderr);
+    assert_eq!(
+        out.stdout,
+        "[2026-11-16 18:00] Climbing: in 28m · 18:30–20:00 · [personal]\n"
+    );
+    let again = notify_once(&state, "2026-11-16T18:03", &[]);
+    assert_eq!(again.stdout, "", "already delivered");
+    let text = std::fs::read_to_string(&state).unwrap();
+    assert!(
+        text.starts_with("personal|climb-1|20261116T173000Z|20261116T170000Z\t"),
+        "{text}"
+    );
+}
+
+#[test]
+fn notify_missed_reminders() {
+    let dir = tempfile::tempdir().unwrap();
+    // 25 minutes late, but the event is still ahead: delivered.
+    let out = notify_once(&dir.path().join("a"), "2026-11-16T18:25", &[]);
+    assert!(out.stdout.contains("Climbing: in 5m"), "{}", out.stdout);
+    // An hour late and the event already started: skipped…
+    let state = dir.path().join("b");
+    let out = notify_once(&state, "2026-11-16T19:00", &[]);
+    assert_eq!(out.stdout, "");
+    // …unless within --catch-up.
+    let out = notify_once(
+        &dir.path().join("c"),
+        "2026-11-16T19:00",
+        &["--catch-up", "2h"],
+    );
+    assert!(
+        out.stdout.contains("Climbing: started 30m ago"),
+        "{}",
+        out.stdout
+    );
+    // The skipped one is recorded, so it is not reconsidered later.
+    assert!(std::fs::read_to_string(&state).unwrap().contains("climb-1"));
+}
+
+#[test]
+fn notify_runs_a_command() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("log");
+    let cmd = format!(
+        "printf '%s|%s|%s\\n' \"$CAL_TUI_SUMMARY\" \"$CAL_TUI_CALENDAR\" \"$CAL_TUI_START\" >> {}",
+        log.display()
+    );
+    let state = dir.path().join("notified");
+    let out = run(&[
+        "--now",
+        "2026-11-16T18:02",
+        "notify",
+        "--once",
+        "--command",
+        &cmd,
+        "--state",
+        state.to_str().unwrap(),
+    ]);
+    assert_eq!(out.status, 0, "{}", out.stderr);
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap(),
+        "Climbing|personal|2026-11-16T18:30:00+01:00\n"
+    );
+}
+
+#[test]
+fn notify_failed_delivery_is_retried() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("notified");
+    let args = |cmd: &'static str| {
+        vec![
+            "--now".to_string(),
+            "2026-11-16T18:02".into(),
+            "notify".into(),
+            "--once".into(),
+            "--command".into(),
+            cmd.into(),
+            "--state".into(),
+            state.to_str().unwrap().into(),
+        ]
+    };
+    let a = args("exit 1");
+    let out = run(&a.iter().map(String::as_str).collect::<Vec<_>>());
+    assert!(out.stderr.contains("failed"), "{}", out.stderr);
+    assert!(!state.exists() || !std::fs::read_to_string(&state).unwrap().contains("climb-1"));
+    let a = args("true");
+    run(&a.iter().map(String::as_str).collect::<Vec<_>>());
+    assert!(std::fs::read_to_string(&state).unwrap().contains("climb-1"));
+}

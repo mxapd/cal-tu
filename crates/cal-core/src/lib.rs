@@ -1,6 +1,7 @@
 //! Core of cal-tui: vdir storage, iCalendar model, recurrence expansion,
 //! queries and edits. Contains no UI code. See DESIGN.md.
 
+pub mod alarms;
 pub mod config;
 pub mod edit;
 pub mod fsio;
@@ -11,6 +12,7 @@ pub mod store;
 pub mod time;
 pub mod vtimezone;
 
+pub use alarms::Alarm;
 pub use config::Config;
 pub use edit::{EditError, EventEdit, NewEvent, NewTodo, Scope, TodoEdit};
 pub use store::{Calendar, Instance, Kind, Store, Todo, Warning};

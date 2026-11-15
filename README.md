@@ -3,8 +3,8 @@
 Calcurse-style terminal calendar and todo manager in Rust, built on plain
 iCalendar files (vdir) synced with CalDAV (e.g. Radicale) via vdirsyncer.
 
-Status: milestone 3 (TUI and shell commands, with editing). Notifications and
-configurable layouts are not implemented yet. See [DESIGN.md](DESIGN.md)
+Status: milestone 4 (TUI, shell commands, editing, reminders). Configurable
+layouts are not implemented yet. See [DESIGN.md](DESIGN.md)
 for the plan.
 
 ## Usage
@@ -28,6 +28,25 @@ cal-tui todo done rent                     # complete it (by part of the title)
 In the TUI: `a` add, `e` edit, `d` delete. For a repeating event you choose
 "only this occurrence" or "all occurrences". In the todo panel `x` marks done
 and `+`/`-` change the priority. Press `?` for all keys.
+
+## Reminders
+
+`cal-tui notify` runs in the background and shows a desktop notification for
+each reminder: the alarms set on events and todos, plus `default_reminder` from
+a calendar's config for timed events that have none (handy for a subscribed
+feed). Each reminder is shown once, also across restarts. Reminders missed
+while the computer was off are still shown if the event has not started yet.
+
+```sh
+cal-tui notify --upcoming 24h    # what will fire in the next 24 hours
+cal-tui notify                   # run the service (normally via systemd)
+cal-tui notify --command 'notify-send "$CAL_TUI_SUMMARY" "$CAL_TUI_BODY"'
+```
+
+With home-manager: `services.cal-tui-notify.enable = true;` (a systemd user
+service started with your graphical session).
+
+## Editing
 
 Edits are written atomically. If a sync changed the file since it was loaded,
 the edit is refused and the calendars are reloaded instead of overwriting the

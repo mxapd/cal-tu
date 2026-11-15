@@ -1,13 +1,11 @@
 //! TUI state and key handling (no drawing).
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
-use std::time::SystemTime;
-
+use cal_core::store::Fingerprint;
 use cal_core::{Config, EditError, Instance, Kind, Scope, Store, Todo, Warning};
 use chrono::{DateTime, Datelike, Duration, Months, NaiveDate, Utc};
 use chrono_tz::Tz;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::form::{Form, Submit};
 use super::layout::{Node, PanelKind};
@@ -83,7 +81,7 @@ pub struct App {
     pub warnings: Vec<Warning>,
     pub next_up: Option<(String, DateTime<Tz>)>,
     marks_range: Option<(NaiveDate, NaiveDate)>,
-    fingerprint: Vec<(PathBuf, Option<SystemTime>)>,
+    fingerprint: Fingerprint,
 }
 
 impl App {
@@ -221,17 +219,9 @@ impl App {
         }
     }
 
-    /// Modification times of the calendars directory and each calendar
-    /// folder. vdirsyncer writes files atomically (rename), which updates the
-    /// folder's mtime.
-    fn compute_fingerprint(&self) -> Vec<(PathBuf, Option<SystemTime>)> {
-        let mtime = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-        let root = self.config.calendars_dir();
-        let mut fp = vec![(root.clone(), mtime(&root))];
-        for cal in &self.store.calendars {
-            fp.push((cal.path.clone(), mtime(&cal.path)));
-        }
-        fp
+    /// State of the calendar folders on disk (see `Store::fingerprint`).
+    fn compute_fingerprint(&self) -> Fingerprint {
+        self.store.fingerprint(&self.config.calendars_dir())
     }
 
     /// Reload if the calendar folders changed on disk. Returns true if so.

@@ -24,11 +24,13 @@ pub struct Calendar {
     pub color: Option<String>,
     pub read_only: bool,
     pub hidden: bool,
+    /// Reminder for timed events without their own alarm.
+    pub default_reminder: Option<chrono::Duration>,
     hide_matching: Vec<Regex>,
 }
 
 impl Calendar {
-    fn hides(&self, summary: &str) -> bool {
+    pub(crate) fn hides(&self, summary: &str) -> bool {
         self.hide_matching.iter().any(|r| r.is_match(summary))
     }
 }
@@ -191,6 +193,10 @@ impl Store {
             color: cc.color.or_else(|| meta("color")),
             read_only: cc.read_only,
             hidden: cc.hidden,
+            default_reminder: cc
+                .default_reminder
+                .as_deref()
+                .and_then(crate::config::parse_offset),
             hide_matching,
             path: folder.to_path_buf(),
             id,
@@ -468,5 +474,34 @@ impl Store {
                     .iter()
                     .position(|c| c.name.eq_ignore_ascii_case(name))
             })
+    }
+}
+
+/// A cheap summary of the calendar folders' state on disk, to notice changes
+/// made by a sync or another program without re-reading every file.
+pub type Fingerprint = Vec<(PathBuf, Option<std::time::SystemTime>, usize)>;
+
+impl Store {
+    /// Folder modification times plus, per calendar, the number of `.ics`
+    /// files and their newest modification time (catches in-place writes,
+    /// which do not change the folder's mtime).
+    pub fn fingerprint(&self, root: &Path) -> Fingerprint {
+        let mtime = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        let mut fp = vec![(root.to_path_buf(), mtime(root), 0)];
+        for cal in &self.calendars {
+            let mut newest = mtime(&cal.path);
+            let mut count = 0;
+            if let Ok(rd) = std::fs::read_dir(&cal.path) {
+                for e in rd.filter_map(|e| e.ok()) {
+                    let p = e.path();
+                    if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("ics")) {
+                        count += 1;
+                        newest = newest.max(e.metadata().and_then(|m| m.modified()).ok());
+                    }
+                }
+            }
+            fp.push((cal.path.clone(), newest, count));
+        }
+        fp
     }
 }

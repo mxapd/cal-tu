@@ -62,6 +62,12 @@ impl Config {
         }
     }
 
+    /// Folder for state the app keeps between runs (reminders already sent,
+    /// layouts saved from the TUI): `$XDG_STATE_HOME/cal-tui`.
+    pub fn state_dir() -> PathBuf {
+        xdg_dir("XDG_STATE_HOME", ".local/state").join("cal-tui")
+    }
+
     pub fn calendars_dir(&self) -> PathBuf {
         match &self.calendars_dir {
             Some(d) => expand_tilde(d),

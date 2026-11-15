@@ -9,6 +9,7 @@
 #       calendars.uni = { color = "cyan"; read_only = true; };
 #     };
 #   };
+#   services.cal-tui-notify.enable = true;   # reminders as desktop notifications
 #
 # `settings` is written to ~/.config/cal-tui/config.toml. The generated file
 # is checked with `cal-tui check-config` at build time, so a typo or an
@@ -19,6 +20,7 @@ self:
 { config, lib, pkgs, ... }:
 let
   cfg = config.programs.cal-tui;
+  notifyCfg = config.services.cal-tui-notify;
   tomlFormat = pkgs.formats.toml { };
   inherit (lib) mkOption mkEnableOption mkIf types literalExpression;
 
@@ -64,6 +66,29 @@ let
   '';
 in
 {
+  options.services.cal-tui-notify = {
+    enable = mkEnableOption "the cal-tui reminder service (desktop notifications for calendar reminders)";
+
+    catchUp = mkOption {
+      type = types.str;
+      default = "10m";
+      description = "Deliver missed reminders up to this old even if the event already started (reminders for events still ahead are always delivered).";
+    };
+
+    command = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "ntfy publish mytopic \"$CAL_TUI_SUMMARY: $CAL_TUI_BODY\"";
+      description = "Run this shell command per reminder instead of a desktop notification. Details are in `$CAL_TUI_SUMMARY`, `$CAL_TUI_BODY`, `$CAL_TUI_START`, `$CAL_TUI_CALENDAR`, `$CAL_TUI_LOCATION`, `$CAL_TUI_UID`.";
+    };
+
+    target = mkOption {
+      type = types.str;
+      default = "graphical-session.target";
+      description = "systemd user target the service is started with (and stopped with).";
+    };
+  };
+
   options.programs.cal-tui = {
     enable = mkEnableOption "cal-tui, a calcurse-style terminal calendar on vdir/CalDAV";
 
@@ -112,8 +137,36 @@ in
     };
   };
 
-  config = mkIf cfg.enable {
-    home.packages = [ cfg.package ];
-    xdg.configFile."cal-tui/config.toml".source = if cfg.checkConfig then checkedFile else rawFile;
-  };
+  config = lib.mkMerge [
+    (mkIf cfg.enable {
+      home.packages = [ cfg.package ];
+      xdg.configFile."cal-tui/config.toml".source = if cfg.checkConfig then checkedFile else rawFile;
+    })
+
+    (mkIf notifyCfg.enable {
+      assertions = [{
+        assertion = cfg.enable;
+        message = "services.cal-tui-notify needs programs.cal-tui.enable = true (it uses the same config and package).";
+      }];
+
+      systemd.user.services.cal-tui-notify = {
+        Unit = {
+          Description = "cal-tui calendar reminders";
+          PartOf = [ notifyCfg.target ];
+          After = [ notifyCfg.target ];
+          # Reload when the generated config changes.
+          X-Restart-Triggers = [ config.xdg.configFile."cal-tui/config.toml".source ];
+        };
+        Service = {
+          ExecStart = lib.escapeShellArgs (
+            [ (lib.getExe cfg.package) "notify" "--catch-up" notifyCfg.catchUp ]
+            ++ lib.optionals (notifyCfg.command != null) [ "--command" notifyCfg.command ]
+          );
+          Restart = "on-failure";
+          RestartSec = 10;
+        };
+        Install.WantedBy = [ notifyCfg.target ];
+      };
+    })
+  ];
 }

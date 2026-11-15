@@ -36,9 +36,8 @@
           };
         };
 
-        # Evaluate the home-manager module like a user would and return the
-        # config file it generates.
-        hmConfigFile = settings:
+        # Evaluate the home-manager module like a user would.
+        hmConfig = extra:
           (home-manager.lib.homeManagerConfiguration {
             inherit pkgs;
             modules = [
@@ -49,13 +48,15 @@
                   homeDirectory = "/home/test";
                   stateVersion = "25.05";
                 };
-                programs.cal-tui = {
-                  enable = true;
-                  inherit settings;
-                };
+                programs.cal-tui.enable = true;
               }
+              extra
             ];
-          }).config.xdg.configFile."cal-tui/config.toml".source;
+          }).config;
+
+        # The config file the module generates for `settings`.
+        hmConfigFile = settings:
+          (hmConfig { programs.cal-tui.settings = settings; }).xdg.configFile."cal-tui/config.toml".source;
       in
       {
         packages.default = cal-tui;
@@ -95,6 +96,24 @@
               cat ${file}
               grep -q '^timezone = "Europe/Stockholm"' ${file}
               grep -q '^read_only = true' ${file}
+              touch $out
+            '';
+
+          # The reminder service becomes a systemd user unit.
+          hm-notify-service =
+            let
+              unit = (hmConfig {
+                services.cal-tui-notify = {
+                  enable = true;
+                  catchUp = "30m";
+                };
+              }).xdg.configFile."systemd/user/cal-tui-notify.service".source;
+            in
+            pkgs.runCommand "cal-tui-hm-notify" { } ''
+              cat ${unit}
+              grep -q "^ExecStart=.*/bin/cal-tui notify --catch-up 30m\$" ${unit}
+              grep -q "^WantedBy=graphical-session.target" ${unit}
+              grep -q "^Restart=on-failure" ${unit}
               touch $out
             '';
 

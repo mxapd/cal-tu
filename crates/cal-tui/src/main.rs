@@ -1,4 +1,5 @@
 mod fmt;
+mod notify;
 mod output;
 mod tui;
 
@@ -13,7 +14,7 @@ use clap::{Parser, Subcommand};
 
 /// Calcurse-style terminal calendar and todo manager on vdir/CalDAV.
 #[derive(Parser)]
-#[command(version, about)]
+#[command(version, about, args_override_self = true)]
 struct Cli {
     /// Config file [default: ~/.config/cal-tui/config.toml]
     #[arg(long, global = true)]
@@ -101,8 +102,32 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Run the reminder daemon (milestone 4).
-    Notify,
+    /// Reminder service: sends a desktop notification for each reminder
+    /// (VALARMs, plus the calendar default_reminder for timed events without
+    /// one). Runs until stopped; see --once and --upcoming.
+    Notify {
+        /// Check once, deliver what is due, and exit.
+        #[arg(long)]
+        once: bool,
+        /// Print reminders to stdout instead of showing notifications.
+        #[arg(long, conflicts_with = "command")]
+        print: bool,
+        /// Run this shell command per reminder instead; details are in
+        /// $CAL_TUI_SUMMARY, $CAL_TUI_BODY, $CAL_TUI_START, $CAL_TUI_CALENDAR,
+        /// $CAL_TUI_LOCATION, $CAL_TUI_UID.
+        #[arg(long)]
+        command: Option<String>,
+        /// List the reminders due within this time (e.g. 24h, 7d) and exit.
+        #[arg(long)]
+        upcoming: Option<String>,
+        /// Deliver missed reminders up to this old even if the event already
+        /// started (reminders for events still ahead are always delivered).
+        #[arg(long, default_value = "10m")]
+        catch_up: String,
+        /// Where delivered reminders are recorded.
+        #[arg(long, default_value_os_t = notify::default_state_path())]
+        state: PathBuf,
+    },
     /// Check the config file for mistakes and exit (non-zero if any).
     CheckConfig,
 }
@@ -233,8 +258,37 @@ fn main() -> Result<()> {
     let Some(command) = cli.command else {
         return tui::run(config, cli.now.as_ref().map(|_| now));
     };
-    if matches!(command, Command::Notify) {
-        bail!("not implemented yet; see DESIGN.md milestones");
+    if let Command::Notify {
+        once,
+        print,
+        command,
+        upcoming,
+        catch_up,
+        state,
+    } = command
+    {
+        let offset = |s: &str, what: &str| {
+            cal_core::config::parse_offset(s)
+                .with_context(|| format!("cannot parse {what} '{s}' (use e.g. 10m, 24h, 7d)"))
+        };
+        if let Some(within) = upcoming {
+            let within = offset(&within, "--upcoming")?;
+            let store = Store::load(&config)?;
+            notify::upcoming(&store, now, within);
+            return Ok(());
+        }
+        let sink = match (print, command) {
+            (true, _) => notify::Sink::Print,
+            (_, Some(c)) => notify::Sink::Command(c),
+            _ => notify::Sink::Desktop,
+        };
+        let opts = notify::Options {
+            once,
+            sink,
+            catch_up: offset(&catch_up, "--catch-up")?,
+            state,
+        };
+        return notify::run(config, cli.now.as_ref().map(|_| now), opts);
     }
 
     let mut store = Store::load(&config)?;
@@ -371,7 +425,7 @@ fn main() -> Result<()> {
                 println!("Not done: {}", t.summary);
             }
         },
-        Command::Notify | Command::CheckConfig => unreachable!(),
+        Command::Notify { .. } | Command::CheckConfig => unreachable!(),
     }
 
     output::report_warnings(&warnings, cli.verbose);
