@@ -381,6 +381,19 @@ impl Store {
         self.instances(self.day_start(date), self.day_start(next))
     }
 
+    /// Whether an instance overlaps the given calendar day (home zone).
+    pub fn occurs_on(&self, i: &Instance, day: NaiveDate) -> bool {
+        let next = day.succ_opt().unwrap_or(day);
+        let (from, to) = (self.day_start(day), self.day_start(next));
+        let s = i.start.instant(self.home);
+        let e = i.end.instant(self.home);
+        if s == e {
+            s >= from && s < to
+        } else {
+            s < to && e > from
+        }
+    }
+
     fn todo_from(&self, idx: usize) -> Option<Todo> {
         let obj = &self.objects[idx];
         if obj.kind != Kind::Todo {

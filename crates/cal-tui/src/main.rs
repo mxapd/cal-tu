@@ -1,4 +1,6 @@
+mod fmt;
 mod output;
+mod tui;
 
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -85,7 +87,7 @@ fn main() -> Result<()> {
     }
 
     let Some(command) = cli.command else {
-        bail!("the TUI is not implemented yet (milestone 2); try `cal-tui agenda`");
+        return tui::run(config);
     };
     if matches!(command, Command::Add { .. } | Command::Notify) {
         bail!("not implemented yet; see DESIGN.md milestones");

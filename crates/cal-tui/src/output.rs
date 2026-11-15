@@ -52,26 +52,10 @@ fn json_item<'a>(store: &'a Store, i: &'a Instance) -> JsonItem<'a> {
 
 /// ANSI foreground escape for a colour name or `#rrggbb`.
 fn ansi(color: Option<&str>) -> Option<String> {
-    let c = color?.trim();
-    if let Some(hex) = c.strip_prefix('#') {
-        if hex.len() >= 6 {
-            let p = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
-            return Some(format!("\x1b[38;2;{};{};{}m", p(0)?, p(2)?, p(4)?));
-        }
-        return None;
-    }
-    let code = match c.to_ascii_lowercase().as_str() {
-        "black" => 30,
-        "red" => 31,
-        "green" => 32,
-        "yellow" => 33,
-        "blue" => 34,
-        "magenta" => 35,
-        "cyan" => 36,
-        "white" => 37,
-        _ => return None,
-    };
-    Some(format!("\x1b[{code}m"))
+    Some(match crate::fmt::parse_color(color)? {
+        crate::fmt::Rgb::Named(n) => format!("\x1b[{}m", 30 + n),
+        crate::fmt::Rgb::True(r, g, b) => format!("\x1b[38;2;{r};{g};{b}m"),
+    })
 }
 
 fn paint(text: &str, color: Option<&str>, enabled: bool) -> String {
@@ -81,45 +65,12 @@ fn paint(text: &str, color: Option<&str>, enabled: bool) -> String {
     }
 }
 
-/// Time column for an instance shown on `day`, e.g. `08:15-10:00`.
 fn time_column(i: &Instance, day: NaiveDate, home: Tz) -> String {
-    if i.kind == Kind::Todo {
-        return match i.start {
-            Moment::DateTime(dt) => format!("due {}", dt.with_timezone(&home).format("%H:%M")),
-            Moment::Date(_) => "due".into(),
-        };
-    }
-    match (i.start, i.end) {
-        (Moment::Date(_), _) | (_, Moment::Date(_)) => "all day".into(),
-        (Moment::DateTime(s), Moment::DateTime(e)) => {
-            let s = s.with_timezone(&home);
-            let e = e.with_timezone(&home);
-            let starts_before = s.date_naive() < day;
-            // An end at exactly midnight belongs to the previous day.
-            let ends_after = e.date_naive() > day
-                && !(e.date_naive() == day + Duration::days(1)
-                    && e.time() == chrono::NaiveTime::MIN);
-            match (starts_before, ends_after) {
-                (true, true) => "all day".into(),
-                (true, false) => format!("   …-{}", e.format("%H:%M")),
-                (false, true) => format!("{}-…   ", s.format("%H:%M")),
-                (false, false) if s == e => format!("{}      ", s.format("%H:%M")),
-                (false, false) => format!("{}-{}", s.format("%H:%M"), e.format("%H:%M")),
-            }
-        }
-    }
+    crate::fmt::time_range(i, day, home).column()
 }
 
 fn on_day(store: &Store, i: &Instance, day: NaiveDate) -> bool {
-    let start = store.day_start(day);
-    let end = store.day_start(day + Duration::days(1));
-    let s = i.start.instant(store.home);
-    let e = i.end.instant(store.home);
-    if s == e {
-        s >= start && s < end
-    } else {
-        s < end && e > start
-    }
+    store.occurs_on(i, day)
 }
 
 pub fn agenda(
@@ -181,16 +132,6 @@ pub fn agenda(
     Ok(())
 }
 
-fn humanize(d: Duration) -> String {
-    let mins = d.num_minutes().max(0);
-    match (mins / 1440, (mins % 1440) / 60, mins % 60) {
-        (0, 0, m) => format!("{m}m"),
-        (0, h, 0) => format!("{h}h"),
-        (0, h, m) => format!("{h}h{m:02}m"),
-        (d, h, _) => format!("{d}d{h}h"),
-    }
-}
-
 pub fn next(
     store: &Store,
     i: &Instance,
@@ -211,7 +152,7 @@ pub fn next(
     let out = format
         .replace("{time}", &time)
         .replace("{summary}", &i.summary)
-        .replace("{in}", &humanize(start - now))
+        .replace("{in}", &crate::fmt::humanize(start - now))
         .replace("{calendar}", &store.calendars[i.calendar].name)
         .replace("{location}", i.location.as_deref().unwrap_or(""));
     println!("{out}");
