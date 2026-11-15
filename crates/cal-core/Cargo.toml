@@ -6,3 +6,15 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+chrono = { version = "0.4.45", features = ["serde"] }
+chrono-tz = "0.10.4"
+iana-time-zone = "0.1.65"
+regex = "1.13.1"
+rrule = "0.14.0"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.2.1"
+
+[dev-dependencies]
+chrono = "0.4.45"
+chrono-tz = "0.10.4"
+toml = "1.2.1"
