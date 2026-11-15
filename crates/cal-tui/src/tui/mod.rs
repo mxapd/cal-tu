@@ -1061,6 +1061,43 @@ mod tests {
         assert_eq!(buf[(r.x - 3, r.y)].fg, today_bg);
     }
 
+    #[test]
+    fn agenda_says_how_much_is_hidden() {
+        let mut app = app();
+        let screen = render(&mut app);
+        let more = screen
+            .lines()
+            .find_map(|l| l.split("⋯ ").nth(1).map(str::to_string))
+            .expect("a ⋯ N more line");
+        assert!(more.contains("more from"), "{more}");
+        let n: usize = more.split(' ').next().unwrap().parse().unwrap();
+        assert!(
+            n > 0 && n < app.upcoming.len(),
+            "{n} of {}",
+            app.upcoming.len()
+        );
+        // Clicking it (the last agenda line) goes to that day.
+        let (_, last) = *app
+            .hits
+            .iter()
+            .rev()
+            .find(|(_, h)| matches!(h, app::Hit::AgendaDay(_)))
+            .unwrap();
+        click_on(&mut app, last);
+        assert!(app.date > day(11, 16));
+        // With room for everything, there is no such line.
+        let tall_calendar = r#"
+            [layout]
+            active = "tall"
+            [layout.presets.tall]
+            split = "rows"
+            children = [ { panel = "calendar", size = 60 }, { panel = "appointments" } ]
+        "#;
+        let mut big = app_with(FIXTURES, tall_calendar, Path::new("/nonexistent/x.toml"));
+        let tall = render_size(&mut big, 110, 80);
+        assert!(!tall.contains('⋯'), "{tall}");
+    }
+
     /// Render the screen as HTML (screen.html) with the colours of a base16
     /// terminal theme, for previewing styling choices:
     /// `CAL_TUI_PREVIEW_OUT=/tmp/x cargo test -p cal-tui export_previews -- --ignored`

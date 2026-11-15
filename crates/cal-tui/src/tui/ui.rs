@@ -862,6 +862,30 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                     lines.push(rule(monday(from)));
                     lines.push(Line::from(" nothing in the next two weeks").style(dim));
                 }
+                // Lines the whole list needs (week rules, day headers, items); if
+                // it does not fit, keep the last line for "N more".
+                let needed_total = {
+                    let (mut n, mut ld, mut lw) = (0, None, None);
+                    for i in &app.upcoming {
+                        let day = i.start.date_in(home).max(from);
+                        if ld != Some(day) {
+                            if lw != Some(monday(day)) {
+                                n += 1;
+                                lw = Some(monday(day));
+                            }
+                            n += 1;
+                            ld = Some(day);
+                        }
+                        n += 1;
+                    }
+                    n
+                };
+                let limit = if lines.len() + needed_total > inner.height as usize {
+                    (inner.height as usize).saturating_sub(1)
+                } else {
+                    inner.height as usize
+                };
+                let mut shown = 0;
                 let title_w = (inner.width as usize).saturating_sub(9);
                 let mut last_day = None;
                 let mut last_week = None;
@@ -871,7 +895,7 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                         let new_week = last_week != Some(monday(day));
                         // Only start a day if one item fits under its header.
                         let needed = if new_week { 3 } else { 2 };
-                        if lines.len() + needed > inner.height as usize {
+                        if lines.len() + needed > limit {
                             break;
                         }
                         if new_week {
@@ -889,7 +913,7 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                         };
                         lines.push(Line::from(when).style(label.add_modifier(Modifier::BOLD)));
                     }
-                    if lines.len() >= inner.height as usize {
+                    if lines.len() >= limit {
                         break;
                     }
                     if let Some(r) = row_rect(lines.len()) {
@@ -913,6 +937,19 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                         Span::raw(" "),
                         Span::styled(ellipsize(&split_title(app, i).0, title_w), title_style),
                     ]));
+                    shown += 1;
+                }
+                // What did not fit: how many, from which day (click to go there).
+                if let Some(next) = app.upcoming.get(shown) {
+                    let hidden = app.upcoming.len() - shown;
+                    let day = next.start.date_in(home).max(from);
+                    if let Some(r) = row_rect(lines.len()) {
+                        hits.push((r, Hit::AgendaDay(day)));
+                    }
+                    lines.push(
+                        Line::from(format!(" ⋯ {hidden} more from {}", day.format("%A %-d %b")))
+                            .style(Style::new().fg(MUTED).add_modifier(Modifier::ITALIC)),
+                    );
                 }
             }
             lines
