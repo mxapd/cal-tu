@@ -1,0 +1,10 @@
+[package]
+name = "cal-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cal-core.workspace = true
+anyhow.workspace = true
+clap.workspace = true

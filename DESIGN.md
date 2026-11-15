@@ -1,0 +1,226 @@
+# cal-tui — design
+
+A calcurse-style terminal calendar and todo manager in Rust, built on plain
+iCalendar files (vdir) and synced to CalDAV through vdirsyncer.
+
+`cal-tui` is a working name.
+
+## Goals
+
+- **A visual TUI for planning time.** It follows calcurse's look: an
+  appointments panel, a month/week calendar panel and a todo panel, with a
+  status bar and vim-style keys.
+- **Quick shell commands** for use outside the TUI (`today`, `agenda`, `next`,
+  `add`, `todo`), with `--json` output for scripts and status bars.
+- **Desktop notifications** from a background reminder service.
+- **Multiple calendars.** Each calendar has its own colour, can be hidden or
+  shown, and can be marked read-only (for example a subscribed university feed).
+- **Reliability.** It never corrupts or quietly drops data, whether written by
+  this app, another client (a phone) or a feed.
+
+## Non-goals
+
+- **No networking in the app.** Sync is vdirsyncer's job, both two-way sync
+  with Radicale and read-only `http` subscriptions.
+- **No import from calcurse.** Everything starts fresh.
+- **No custom file format.** Data is standard `.ics` files only.
+
+## Architecture
+
+```
+            ┌──────────── Radicale (CalDAV) ───────────┐   uni .ics feed (http)
+            │                                          │          │
+            └──────────────── vdirsyncer ──────────────┴──────────┘
+                                   │  (systemd timer / `S` key in TUI)
+                                   ▼
+        ~/.local/share/calendars/<calendar>/<uid>.ics      (vdir)
+                                   ▲
+              ┌────────────────────┼─────────────────────┐
+              │               cal-core (lib)              │
+              │  store · model · recurrence · query · edit│
+              └───────┬───────────────┬──────────────┬────┘
+                      │               │              │
+                  TUI (ratatui)   CLI (clap)   notify daemon
+                      └─────── single binary `cal-tui` ──┘
+```
+
+### Crates
+
+| Crate | Responsibility |
+|---|---|
+| `cal-core` | Read and write vdirs; parse and serialise iCal; expand recurrences; run queries over date ranges; edit (whole series or one occurrence); read config. No UI code. |
+| `cal-tui` (bin) | Subcommands: none (starts the TUI), `today`, `agenda`, `next`, `add`, `todo`, `notify`. |
+
+Expected libraries: `icalendar` (or a lenient parser of our own if feeds need
+it), `rrule`, `chrono` + `chrono-tz`, `ratatui` + `crossterm`, `clap`,
+`notify` (file watching), `notify-rust` (desktop notifications), `serde` +
+`toml`, `directories`.
+
+## Storage (vdir)
+
+- Each calendar is a folder under `calendars_dir`. vdirsyncer writes `color`
+  and `displayname` metadata files into it, and the config can override them.
+- Each item is one `.ics` file holding one `VCALENDAR`, which holds one
+  `VEVENT` or `VTODO` main component plus any override components (same `UID`
+  with a `RECURRENCE-ID`) and `VTIMEZONE`s.
+- **Item identity is `(calendar, UID)`.** The filename is never used as an
+  identifier.
+
+### Reliability rules
+
+1. **Lossless round-trip.** The parsed model keeps every property and
+   parameter, including unknown `X-` properties, `VALARM`s and `ATTENDEE`s.
+   An edit changes only the fields the user touched and then re-serialises.
+   This is the most important rule.
+2. **Atomic writes.** Write `<file>.tmp`, fsync, then rename. Never write in
+   place.
+3. **Lenient reading, strict writing.** If a file fails to parse, the item is
+   skipped and a warning is shown (status bar or stderr). It never crashes the
+   app or hides a whole calendar.
+4. **Read-only calendars** are enforced in the core: every edit API returns an
+   error for them, whatever the UI does.
+5. **Detect external changes.** Record each file's mtime/hash when it is read.
+   Before writing, check it again; if the file changed underneath us (a sync
+   ran), reload and ask instead of overwriting.
+6. **Time zones.** Map Windows/Outlook TZIDs (for example
+   `W. Europe Standard Time`) to IANA names. Floating times use the local zone.
+   New items are written with an IANA `TZID`.
+
+## Recurrence
+
+- Expand `RRULE`/`RDATE`/`EXDATE` within the queried range only (lazily).
+- Apply overrides (`RECURRENCE-ID`) on top of the expanded instances.
+  Cancelled instances (`STATUS:CANCELLED`) and `EXDATE`s are removed.
+- **Editing scope.** When editing or deleting a repeating item, the UI asks:
+  - **This occurrence:** write or update an override component (edit), or add
+    an `EXDATE` (delete).
+  - **All occurrences:** edit the main component. Moving the start shifts the
+    existing overrides consistently.
+  - *(Later)* **This and following:** split the series (end the old `RRULE`
+    with `UNTIL`, then a new UID).
+- **Test heavily:** daylight-saving transitions, all-day vs. timed items,
+  overrides that move an instance to another day, and `UNTIL` vs. `COUNT`.
+
+## Todos
+
+- Stored as `VTODO`. Fields: `SUMMARY`, `PRIORITY` (1–9, same as calcurse; 0 =
+  none), `DUE`, `STATUS`/`COMPLETED`, `DESCRIPTION`.
+- The todo panel sorts by priority, then due date. Completed todos can be
+  shown or hidden with a toggle.
+- Todos with a due date also appear on that day in the appointments panel.
+
+## TUI
+
+Default layout (classic, like calcurse):
+
+```
+┌─ Appointments ──────────────┐┌─ Calendar ─┐
+│ all-day items               ││ month grid │
+│ ─────────                   │└────────────┘
+│ timed items, in calendar    │┌─ Todo ─────┐
+│ colours, [calendar] tag     ││            │
+└─────────────────────────────┘└────────────┘
+ date | time | visible calendars | next: … in 0:28
+ key hints
+```
+
+- **Panels:** `appointments`, `calendar` (monthly or weekly), `todo`.
+  `agenda` and `week` panels may come later.
+- **Calendar colours** are used for items and for the day markers in the grid.
+  Read-only items are dimmed or marked and cannot be edited.
+- **Notes:** the description is opened in `$EDITOR`.
+
+### Layout system
+
+The layout is a tree of `rows`/`columns` splits whose leaves are panels. A size
+is a percentage, a fixed number of cells, or omitted (takes the remaining
+space). Named presets live in the config.
+
+```toml
+[layout]
+active = "classic"
+narrow = { below_width = 80, preset = "stacked" }
+
+[layout.presets.classic]
+split = "columns"
+children = [
+  { panel = "appointments", size = "60%" },
+  { split = "rows", children = [
+      { panel = "calendar", size = 9 },
+      { panel = "todo" },
+  ]},
+]
+```
+
+In the TUI you can cycle through presets, grow or shrink the focused panel,
+swap or move the focused panel, hide or show a panel, and save the current
+layout as a preset (written back to the config).
+
+### Keys (initial; follow calcurse where they make sense)
+
+| Key | Action |
+|---|---|
+| `h j k l` / arrows | move by day/week (calendar), select item (lists) |
+| `Tab` / `Shift-Tab` | next/previous panel |
+| `a` / `e` / `d` | add / edit / delete (asks for the scope on repeating items) |
+| `g` / `t` | go to date / today |
+| `n` | edit note (description) in `$EDITOR` |
+| `c` | toggle calendar visibility |
+| `S` | run sync command, then reload |
+| `L` | layout mode (resize, move, cycle presets, save) |
+| `?` / `q` | help / quit |
+
+## CLI
+
+```
+cal-tui                          # TUI
+cal-tui today [--json]
+cal-tui agenda [--days N] [--calendar NAME]... [--json]
+cal-tui next [--format FMT]     # one line, for status bars
+cal-tui add "Dentist fri 14:00 1h" [-c CAL] [--remind 15m]
+cal-tui todo [list|add|done] ...
+cal-tui notify                   # reminder daemon
+```
+
+## Notifications
+
+- `cal-tui notify` runs as a systemd user service. It watches the vdirs (with
+  `notify`), keeps an in-memory index of upcoming alarms for the next N hours,
+  and sends desktop notifications through `notify-rust`.
+- **Alarm sources:** each item's `VALARM`s (`TRIGGER` relative to start or
+  absolute), plus per-calendar defaults from the config (for example 15 minutes
+  before `uni` events, which have no `VALARM`).
+- **Each alarm fires exactly once.** A small state file records sent
+  `(calendar, uid, recurrence-id, trigger)` keys, and old keys are pruned.
+
+## Config (`~/.config/cal-tui/config.toml`)
+
+```toml
+calendars_dir = "~/.local/share/calendars"
+sync_command  = "vdirsyncer sync"
+default_calendar = "personal"
+
+[calendars.uni]
+color = "cyan"
+read_only = true
+default_reminder = "15m"
+hide_matching = ["^Tutorial group B"]   # optional title filter
+
+[calendars.personal]
+color = "green"
+```
+
+## Milestones
+
+1. **Core read path:** read vdirs leniently, expand recurrences with overrides
+   and time zones, and make `agenda`, `today` and `next` work against a real
+   Radicale vdir and the university feed. Tests use fixture `.ics` files.
+2. **TUI (read-only):** the classic layout, navigation, calendar colours and
+   visibility toggles.
+3. **Editing:** add, edit and delete events and todos, with series vs.
+   occurrence scope, atomic writes and conflict detection. Includes the CLI
+   `add` and `todo` commands.
+4. **Notifications:** the `notify` daemon and a systemd unit.
+5. **Layout engine:** presets, in-app rearranging, saving to the config.
+6. **Packaging:** Nix package, home-manager/systemd units for `notify` and the
+   vdirsyncer timer.

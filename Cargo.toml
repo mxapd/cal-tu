@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/cal-core", "crates/cal-tui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+cal-core = { path = "crates/cal-core" }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
