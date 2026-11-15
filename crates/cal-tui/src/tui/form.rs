@@ -120,7 +120,7 @@ impl FieldId {
             FieldId::Start => {
                 "When it starts, e.g. 14:00 or 2pm. Leave empty for an all-day event."
             }
-            FieldId::End => "Ends at 15:30, or lasts 1h30. Empty = 1 hour. All day: last day or 3d",
+            FieldId::End => "Ends at 15:30, or lasts 1h30; empty = 1 hour. All day: last day/3d",
             FieldId::Repeat => "none, daily, weekdays, weekly, biweekly, monthly, yearly, FREQ=…",
             FieldId::Reminder => "15m, 1h, 1d; empty = none",
             FieldId::Due => "fri, 12-24 17:00, tomorrow 9am; empty = none",

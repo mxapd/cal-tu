@@ -18,7 +18,7 @@
  16:00│              Notes      optional                                                                      
       │              Calendar   ◀ personal ▶                                                                  
  17:00│                                                                                                       
-      │              Ends at 15:30, or lasts 1h30. Empty = 1 hour. All day: last day or 3d                    
+      │              Ends at 15:30, or lasts 1h30; empty = 1 hour. All day: last day/3d                       
  18:00│                                                                                                       
       │▌ Climbing  18:30–20:00                                     │                                          
  19:00│▌ ↻  personal                                               │                                          
