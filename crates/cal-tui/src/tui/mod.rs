@@ -1026,6 +1026,41 @@ mod tests {
         assert_ne!(cloud, sep);
     }
 
+    #[test]
+    fn today_stands_out_in_the_month() {
+        use ratatui::style::Color;
+        let mut app = app();
+        press(&mut app, 'l'); // select tomorrow, so today and the selection differ
+        let mut term = Terminal::new(TestBackend::new(110, 32)).unwrap();
+        term.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let cell_bg = |d: NaiveDate| {
+            let (r, _) = *app
+                .hits
+                .iter()
+                .find(|(_, h)| *h == app::Hit::Day(d))
+                .unwrap();
+            let buf = term.backend().buffer();
+            (buf[(r.x + 1, r.y)].bg, buf[(r.x + 1, r.y)].fg)
+        };
+        let (today_bg, today_fg) = cell_bg(day(11, 16));
+        let (sel_bg, _) = cell_bg(day(11, 17));
+        let (plain_bg, _) = cell_bg(day(11, 18));
+        assert_ne!(today_bg, Color::Reset, "today is filled");
+        assert_eq!(today_fg, Color::Black);
+        assert_ne!(sel_bg, today_bg, "selection looks different from today");
+        assert_eq!(plain_bg, Color::Reset);
+        // Week 47 (today's week) number in the same colour as today.
+        let buf = term.backend().buffer();
+        let (r, _) = *app
+            .hits
+            .iter()
+            .find(|(_, h)| *h == app::Hit::Day(day(11, 16)))
+            .unwrap();
+        let wk: String = (r.x - 4..r.x - 1).map(|x| buf[(x, r.y)].symbol()).collect();
+        assert_eq!(wk.trim(), "47");
+        assert_eq!(buf[(r.x - 3, r.y)].fg, today_bg);
+    }
+
     /// Render the screen as HTML (screen.html) with the colours of a base16
     /// terminal theme, for previewing styling choices:
     /// `CAL_TUI_PREVIEW_OUT=/tmp/x cargo test -p cal-tui export_previews -- --ignored`

@@ -751,9 +751,6 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                 // Numbers stay in the normal text colour; the dots carry the
                 // calendar colours.
                 let mut text = if other_month { dim } else { Style::new() };
-                if d == today {
-                    text = text.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
-                }
                 let mut around = Style::new();
                 if d == app.date {
                     let bg = if focused {
@@ -764,8 +761,21 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                     around = around.bg(bg);
                     text = text.bg(bg).add_modifier(Modifier::BOLD);
                 }
+                // Today: a filled pill in the "now" red, the same colour as the
+                // now line in the day view (wins over the selection colour).
+                let pill = if d == today {
+                    Style::new()
+                        .bg(NOW)
+                        .fg(Color::Black)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    around
+                };
+                if d == today {
+                    text = pill;
+                }
                 let mut cell = vec![
-                    Span::styled(" ", around),
+                    Span::styled(" ", pill),
                     Span::styled(format!("{:>2}", d.day()), text),
                 ];
                 // One dot per calendar with items that day, as many as fit.
@@ -799,7 +809,15 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                 let monday = start + Duration::days(week * 7);
                 let mut spans = vec![
                     Span::raw(pad.clone()),
-                    Span::styled(format!("{:>2} ", monday.iso_week().week()), label),
+                    Span::styled(
+                        format!("{:>2} ", monday.iso_week().week()),
+                        // The current week's number in the "now" colour.
+                        if (monday..monday + Duration::days(7)).contains(&today) {
+                            Style::new().fg(NOW).add_modifier(Modifier::BOLD)
+                        } else {
+                            label
+                        },
+                    ),
                 ];
                 let y = 1 + week as usize;
                 for wd in 0..7 {
