@@ -5,7 +5,7 @@ use chrono::{Datelike, Duration, NaiveDate};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
 use super::app::{App, CalView, Hit, Pending, Popup};
@@ -52,6 +52,18 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_status(f, app, status);
     draw_keys(f, app, keys);
 
+    // With a pop-up open, everything behind it (except the key hints) is
+    // dimmed so the card stands out.
+    if app.popup.is_some() {
+        let behind = Rect::new(content.x, content.y, content.width, keys.y - content.y);
+        f.buffer_mut().set_style(
+            behind,
+            Style::new()
+                .fg(Color::Indexed(240))
+                .bg(Color::Reset)
+                .remove_modifier(Modifier::BOLD | Modifier::UNDERLINED | Modifier::REVERSED),
+        );
+    }
     match app.popup.clone() {
         Some(Popup::Help) => draw_help(f),
         Some(Popup::Details) => draw_details(f, app),
@@ -64,6 +76,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         None => {}
     }
     if let Some(area) = LAST_POPUP.take().filter(|_| app.popup.is_some()) {
+        // The card's title row becomes an accent bar.
+        f.buffer_mut().set_style(
+            Rect::new(area.x, area.y, area.width, 1),
+            Style::new().bg(POPUP_BAR).fg(Color::Black),
+        );
         app.hits.push((area, Hit::Popup));
         if matches!(app.popup, Some(Popup::Calendars { .. })) {
             for i in 0..app.store.calendars.len() as u16 {
@@ -1057,11 +1074,20 @@ fn popup_area(f: &Frame, width: u16, height: u16) -> Rect {
     r
 }
 
+/// Background of pop-ups: a card slightly lighter than the screen.
+const POPUP_BG: Color = Color::Indexed(235);
+
+/// Accent bar at the top of a pop-up.
+const POPUP_BAR: Color = Color::Rgb(95, 135, 175);
+
+/// A pop-up is a filled card without lines: padding where a border would be
+/// (so sizes and positions stay the same), title in the top row, which
+/// `draw` turns into an accent bar.
 fn popup_block(title: &str) -> Block<'_> {
-    Block::bordered()
-        .border_type(BorderType::Plain)
-        .border_style(Style::new().fg(Color::Cyan))
+    Block::new()
+        .style(Style::new().bg(POPUP_BG))
         .title(Line::from(format!(" {title} ")).bold().centered())
+        .padding(ratatui::widgets::Padding::new(1, 1, 0, 1))
 }
 
 fn draw_help(f: &mut Frame) {

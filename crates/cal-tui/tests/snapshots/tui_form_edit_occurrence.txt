@@ -9,16 +9,16 @@
  11:32┼────────────────────────────────────────────────────────────│ ── This week ─────────────────────────── 
  12:00│▌ Lunch with Anna  12:00–13:00                              │ Tomorrow · Tue 17 Nov                    
       │▌ Café Lisa  personal                                       │  09:00 Floating standup                  
- 13:00│            ┌──────────────────────── Edit this occurrence ────────────────────────┐                   
-      │            │ Title      Climbing with Sam                                         │                   
- 14:00│            │ Date       2026-11-16                                                │                   
-      │            │ Start      18:30                                                     │                   
- 15:00│            │ End        20:00                                                     │                   
-      │            │ Location                                                             │───────────────────
- 16:00│            │ Notes                                                                │                   
-      │            │                                                                      │                   
- 17:00│            │                                                                      │                   
-      │            └──────────────────────────────────────────────────────────────────────┘                   
+ 13:00│                                      Edit this occurrence                                             
+      │              Title      Climbing with Sam                                                             
+ 14:00│              Date       2026-11-16                                                                    
+      │              Start      18:30                                                                         
+ 15:00│              End        20:00                                                                         
+      │              Location                                                              ───────────────────
+ 16:00│              Notes                                                                                    
+      │                                                                                                       
+ 17:00│                                                                                                       
+      │                                                                                                       
  18:00│                                                            │                                          
       │▌ Climbing  18:30–20:00                                     │                                          
  19:00│▌ ↻  personal                                               │                                          

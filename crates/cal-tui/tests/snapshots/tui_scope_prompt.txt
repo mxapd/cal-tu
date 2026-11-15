@@ -10,13 +10,13 @@
  12:00│▌ Lunch with Anna  12:00–13:00                              │ Tomorrow · Tue 17 Nov                    
       │▌ Café Lisa  personal                                       │  09:00 Floating standup                  
  13:00│                                                            │ Wednesday 18 Nov                         
-      │                    ┌──────────────── Edit repeating event ────────────────┐t                          
- 14:00│                    │ “Climbing” repeats.                                  │g                          
-      │                    │                                                      │                           
- 15:00│                    │  o  only this occurrence (Mon 16 Nov)                │ trip                      
-      │                    │  a  all occurrences                                  │───────────────────────────
- 16:00│                    │  Esc cancel                                          │    Todo                   
-      │                    └──────────────────────────────────────────────────────┘ Nov                       
+      │                                      Edit repeating event                  t                          
+ 14:00│                      “Climbing” repeats.                                   g                          
+      │                                                                                                       
+ 15:00│                       o  only this occurrence (Mon 16 Nov)                  trip                      
+      │                       a  all occurrences                                   ───────────────────────────
+ 16:00│                       Esc cancel                                               Todo                   
+      │                                                                             Nov                       
  17:00│                                                            │ 5. Fix bike                              
       │                                                            │                                          
  18:00│                                                            │                                          

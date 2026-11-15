@@ -905,6 +905,41 @@ mod tests {
         );
     }
 
+    #[test]
+    fn popup_is_a_card_over_a_dimmed_screen() {
+        use ratatui::style::Color;
+        let mut app = app();
+        press(&mut app, '?');
+        let mut term = Terminal::new(TestBackend::new(110, 32)).unwrap();
+        term.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let card = *app
+            .hits
+            .iter()
+            .find(|(_, h)| *h == app::Hit::Popup)
+            .map(|(r, _)| r)
+            .unwrap();
+        let buf = term.backend().buffer();
+        // No line characters around the card.
+        for x in card.left()..card.right() {
+            for y in [card.top(), card.bottom() - 1] {
+                assert!(
+                    !"─│┌┐└┘▔▁▏▕".contains(buf[(x, y)].symbol()),
+                    "line at {x},{y}"
+                );
+            }
+        }
+        // Accent title bar, card background inside, dimmed screen outside.
+        assert_ne!(buf[(card.x, card.y)].bg, Color::Reset);
+        assert_eq!(buf[(card.x + 2, card.y + 2)].bg, Color::Indexed(235));
+        assert_eq!(
+            buf[(1, 1)].fg,
+            Color::Indexed(240),
+            "screen behind is dimmed"
+        );
+        // Key hints stay readable.
+        assert_ne!(buf[(1, 31)].fg, Color::Indexed(240));
+    }
+
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`
     /// (set CAL_TUI_SCREEN_DIR to render a real calendars folder instead).
     #[test]

@@ -11,11 +11,11 @@
       │▌ Café Lisa  personal                                       │  09:00 Floating standup                  
  13:00│                                                            │ Wednesday 18 Nov                         
       │                                                            │  due   Pay rent                          
- 14:00│                    ┌─────────────────────── Delete ───────────────────────┐g                          
-      │                    │ Delete “Lunch with Anna”?                            │                           
- 15:00│                    │                                                      │ trip                      
-      │                    │  y  yes    n  no                                     │───────────────────────────
- 16:00│                    └──────────────────────────────────────────────────────┘    Todo                   
+ 14:00│                                             Delete                         g                          
+      │                      Delete “Lunch with Anna”?                                                        
+ 15:00│                                                                             trip                      
+      │                       y  yes    n  no                                      ───────────────────────────
+ 16:00│                                                                                Todo                   
       │                                                            │ 1. Pay rent 18 Nov                       
  17:00│                                                            │ 5. Fix bike                              
       │                                                            │                                          
