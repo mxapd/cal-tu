@@ -1,15 +1,14 @@
 ╭─────────────────────────── Appointments · today ───────────────────────────╮╭───── Week 47 · Nov 2026 ─────╮
 │ Monday, November 16, 2026                                                  ││     Mon 16  ●●               │
 │                                                                            ││     Tue 17  ●                │
-│ ○ 08:15 -> 10:00 *                                                         ││     Wed 18  ●                │
-│   Linear Algebra╭───────────────────────────────── Help ─────────────────────────────────╮                 │
-│ ● 12:00 -> 13:00│ h / l, ← / →      previous / next day                                  │●                │
-│   Lunch with Ann│ H / L             previous / next week                                 │●                │
-│ ● 18:30 -> 20:00│ [ / ]             previous / next month                                │●                │
-│   Climbing  [per│ j / k, ↓ / ↑      move selection (calendar panel: week)                │─────────────────╯
-│                 │ Tab / Shift-Tab   next / previous panel                                │TODO ────────────╮
-│                 │ t                 go to today                                          │18 Nov           │
-│                 │ g                 go to date (2026-12-24, 12-24, 24, +7, -7)           │                 │
+│ ○ 08:15 -> 10:00╭───────────────────────────────── Help ─────────────────────────────────╮●                │
+│   Linear Algebra│ h / l, ← / →      previous / next day                                  │                 │
+│ ● 12:00 -> 13:00│ H / L             previous / next week                                 │●                │
+│   Lunch with Ann│ [ / ]             previous / next month                                │●                │
+│ ● 18:30 -> 20:00│ j / k, ↓ / ↑      move selection (calendar panel: week)                │●                │
+│   Climbing  [per│ Tab / Shift-Tab   next / previous panel                                │─────────────────╯
+│                 │ t                 go to today                                          │TODO ────────────╮
+│                 │ g                 go to date (2026-12-24, 12-24, 24, +7, -7)           │18 Nov           │
 │                 │ Enter             show details of the selected item                    │                 │
 │                 │ a                 add an event (todo panel: a todo)                    │                 │
 │                 │ e                 edit the selected item                               │                 │
@@ -22,6 +21,7 @@
 │                 │ S                 sync (runs sync_command), then reload                │                 │
 │                 │ R                 reload from disk                                     │                 │
 │                 │ W                 show loading warnings                                │                 │
+│                 │ w                 layout mode: presets, resize, swap, hide panels; Ente│                 │
 │                 │ q                 quit                                                 │                 │
 │                 │                                                                        │                 │
 │                 │ Markers           ● calendar item  ○ read-only  * repeats  > has notes │                 │

@@ -3,8 +3,8 @@
 Calcurse-style terminal calendar and todo manager in Rust, built on plain
 iCalendar files (vdir) synced with CalDAV (e.g. Radicale) via vdirsyncer.
 
-Status: milestone 4 (TUI, shell commands, editing, reminders). Configurable
-layouts are not implemented yet. See [DESIGN.md](DESIGN.md)
+Status: milestone 5 (TUI with editing and rearrangeable layouts, shell
+commands, reminders). Next: packaging polish and styling. See [DESIGN.md](DESIGN.md)
 for the plan.
 
 ## Usage
@@ -28,6 +28,30 @@ cal-tui todo done rent                     # complete it (by part of the title)
 In the TUI: `a` add, `e` edit, `d` delete. For a repeating event you choose
 "only this occurrence" or "all occurrences". In the todo panel `x` marks done
 and `+`/`-` change the priority. Press `?` for all keys.
+
+## Layouts
+
+Press `w` in the TUI for layout mode: `←`/`→` cycle presets (`classic`,
+`classic-left`, `three-columns`, `stacked`, plus your own), `Tab` picks a panel,
+`+`/`-` resize it, `<`/`>` resize its column, `s` swaps it with its neighbour, `r`
+turns a row into a column, `x` hides it, `u` brings hidden panels back, `Enter`
+saves (to `~/.local/state/cal-tui/layout.toml`) and `Esc` leaves.
+
+Layouts can also be declared in the config (or in Nix via
+`programs.cal-tui.settings.layout`); those take precedence over saved ones:
+
+```toml
+[layout]
+active = "mine"
+narrow = { below_width = 70, preset = "stacked" }   # small terminals
+
+[layout.presets.mine]
+split = "columns"
+children = [
+  { panel = "appointments", size = "60%" },
+  { split = "rows", children = [ { panel = "calendar", size = 9 }, { panel = "todo" } ] },
+]
+```
 
 ## Reminders
 

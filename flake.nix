@@ -83,6 +83,23 @@
             let
               file = hmConfigFile {
                 timezone = "Europe/Stockholm";
+                layout = {
+                  active = "mine";
+                  narrow = { below_width = 80; preset = "stacked"; };
+                  presets.mine = {
+                    split = "columns";
+                    children = [
+                      { panel = "appointments"; size = "60%"; }
+                      {
+                        split = "rows";
+                        children = [
+                          { panel = "calendar"; size = 9; }
+                          { panel = "todo"; }
+                        ];
+                      }
+                    ];
+                  };
+                };
                 default_calendar = "personal";
                 sync_command = "vdirsyncer sync";
                 calendars.uni = {

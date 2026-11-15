@@ -6,9 +6,12 @@ use chrono::{DateTime, Datelike, Duration, Months, NaiveDate, Utc};
 use chrono_tz::Tz;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use super::form::{Form, Submit};
 use super::layout::{Node, PanelKind};
+use cal_core::layout::{LayoutConfig, BUILTIN};
+use ratatui::layout::Rect;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CalView {
@@ -69,7 +72,19 @@ pub struct App {
     pub todo_sel: usize,
     pub popup: Option<Popup>,
     pub message: Option<String>,
+    /// The layout in use (possibly changed in layout mode).
     pub layout: Node,
+    /// Preset it came from, and whether it was changed since.
+    pub layout_name: String,
+    pub layout_modified: bool,
+    /// Layout mode (`w`): keys rearrange panels.
+    pub layout_mode: bool,
+    layout_cfg: LayoutConfig,
+    layout_state: LayoutConfig,
+    layout_state_path: PathBuf,
+    /// Set while drawing: the main area and the panels shown in it.
+    pub main_area: Rect,
+    pub shown_panels: Vec<PanelKind>,
     /// Fixed "now" for tests.
     pub now_override: Option<DateTime<Tz>>,
 
@@ -86,7 +101,22 @@ pub struct App {
 
 impl App {
     pub fn new(config: Config, store: Store) -> App {
+        Self::with_layout_state(config, store, Config::state_dir().join("layout.toml"))
+    }
+
+    /// Like `new`, with layouts saved from the TUI kept at `state_path`.
+    pub fn with_layout_state(config: Config, store: Store, state_path: PathBuf) -> App {
         let today = Utc::now().with_timezone(&store.home).date_naive();
+        let mut startup_message = None;
+        // Invalid layout settings must not stop the app: fall back and say so.
+        let layout_cfg = config.layout().unwrap_or_else(|e| {
+            startup_message = Some(format!("Ignoring [layout] in config: {e}"));
+            LayoutConfig::default()
+        });
+        let layout_state = LayoutConfig::load_state(&state_path).unwrap_or_else(|e| {
+            startup_message = Some(format!("Ignoring saved layout: {e}"));
+            LayoutConfig::default()
+        });
         let mut app = App {
             config,
             store,
@@ -98,8 +128,16 @@ impl App {
             appt_sel: 0,
             todo_sel: 0,
             popup: None,
-            message: None,
-            layout: Node::classic(),
+            message: startup_message,
+            layout: Node::builtin("classic").expect("built-in"),
+            layout_name: "classic".into(),
+            layout_modified: false,
+            layout_mode: false,
+            layout_cfg,
+            layout_state,
+            layout_state_path: state_path,
+            main_area: Rect::default(),
+            shown_panels: Vec::new(),
             now_override: None,
             day_items: Vec::new(),
             todos: Vec::new(),
@@ -109,6 +147,13 @@ impl App {
             marks_range: None,
             fingerprint: Vec::new(),
         };
+        let active = app
+            .layout_cfg
+            .active
+            .clone()
+            .or_else(|| app.layout_state.active.clone())
+            .unwrap_or_else(|| "classic".into());
+        app.set_preset(&active);
         app.fingerprint = app.compute_fingerprint();
         app.apply_visibility();
         app.refresh();
@@ -275,6 +320,10 @@ impl App {
             self.handle_popup_key(key);
             return Action::None;
         }
+        if self.layout_mode {
+            self.handle_layout_key(key);
+            return Action::None;
+        }
         match key.code {
             KeyCode::Char('q') => return Action::Quit,
             KeyCode::Char('?') => self.popup = Some(Popup::Help),
@@ -308,6 +357,7 @@ impl App {
                 self.refresh();
             }
             KeyCode::Char('W') => self.popup = Some(Popup::Warnings { scroll: 0 }),
+            KeyCode::Char('w') => self.layout_mode = true,
             KeyCode::Char('R') => {
                 self.reload();
                 self.message = Some("Reloaded".into());
@@ -553,8 +603,171 @@ impl App {
         }
     }
 
+    // --- layouts ---------------------------------------------------------------
+
+    /// Preset names in cycling order: built-in, then saved, then config.
+    pub fn preset_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = BUILTIN.iter().map(|s| s.to_string()).collect();
+        for n in self
+            .layout_state
+            .presets
+            .keys()
+            .chain(self.layout_cfg.presets.keys())
+        {
+            if !names.contains(n) {
+                names.push(n.clone());
+            }
+        }
+        names
+    }
+
+    /// A preset by name: config beats saved beats built-in.
+    pub fn preset(&self, name: &str) -> Option<Node> {
+        self.layout_cfg
+            .presets
+            .get(name)
+            .or_else(|| self.layout_state.presets.get(name))
+            .cloned()
+            .or_else(|| Node::builtin(name))
+    }
+
+    fn set_preset(&mut self, name: &str) {
+        match self.preset(name) {
+            Some(n) => {
+                self.layout = n;
+                self.layout_name = name.to_string();
+            }
+            None => {
+                self.message = Some(format!("No layout preset named '{name}'; using classic"));
+                self.layout = Node::builtin("classic").expect("built-in");
+                self.layout_name = "classic".into();
+            }
+        }
+        self.layout_modified = false;
+    }
+
+    /// The layout to draw in a main area `width` cells wide.
+    pub fn displayed_layout(&self, width: u16) -> Node {
+        let (below, preset) = self
+            .layout_cfg
+            .narrow
+            .clone()
+            .or_else(|| self.layout_state.narrow.clone())
+            .unwrap_or((70, "stacked".into()));
+        if !self.layout_mode && width < below {
+            if let Some(n) = self.preset(&preset) {
+                return n;
+            }
+        }
+        self.layout.clone()
+    }
+
+    fn handle_layout_key(&mut self, key: KeyEvent) {
+        use super::layout as l;
+        let panel = self.focus;
+        let area = self.main_area;
+        let changed = match key.code {
+            KeyCode::Esc | KeyCode::Char('w') | KeyCode::Char('q') => {
+                self.layout_mode = false;
+                return;
+            }
+            KeyCode::Tab => {
+                self.cycle_focus(1);
+                return;
+            }
+            KeyCode::BackTab => {
+                self.cycle_focus(-1);
+                return;
+            }
+            KeyCode::Right | KeyCode::Char('n') | KeyCode::Left | KeyCode::Char('p') => {
+                let names = self.preset_names();
+                let i = names
+                    .iter()
+                    .position(|n| *n == self.layout_name)
+                    .unwrap_or(0) as i32;
+                let step = if matches!(key.code, KeyCode::Left | KeyCode::Char('p')) {
+                    -1
+                } else {
+                    1
+                };
+                let next = names[(i + step).rem_euclid(names.len() as i32) as usize].clone();
+                self.set_preset(&next);
+                self.fix_focus();
+                return;
+            }
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                l::resize(&mut self.layout, panel, true, 5, area)
+            }
+            KeyCode::Char('-') => l::resize(&mut self.layout, panel, true, -5, area),
+            KeyCode::Char('>') => l::resize(&mut self.layout, panel, false, 5, area),
+            KeyCode::Char('<') => l::resize(&mut self.layout, panel, false, -5, area),
+            KeyCode::Char('s') => l::swap(&mut self.layout, panel),
+            KeyCode::Char('r') => l::rotate(&mut self.layout, panel),
+            KeyCode::Char('x') => {
+                let ok = l::hide(&mut self.layout, panel);
+                self.fix_focus();
+                ok
+            }
+            KeyCode::Char('u') => l::unhide(&mut self.layout),
+            KeyCode::Enter => {
+                self.save_layout();
+                return;
+            }
+            _ => false,
+        };
+        if changed {
+            self.layout_modified = true;
+        }
+    }
+
+    /// Keep the focus on a panel that is in the layout.
+    fn fix_focus(&mut self) {
+        let panels = self.layout.panels();
+        if !panels.contains(&self.focus) {
+            self.focus = panels.first().copied().unwrap_or(PanelKind::Appointments);
+        }
+    }
+
+    /// Save the current layout to the state file and make it the default.
+    fn save_layout(&mut self) {
+        let name = if self.layout_modified || !self.preset_names().contains(&self.layout_name) {
+            "custom".to_string()
+        } else {
+            self.layout_name.clone()
+        };
+        let mut state = self.layout_state.clone();
+        if self.layout_modified {
+            state.presets.insert(name.clone(), self.layout.clone());
+        }
+        state.active = Some(name.clone());
+        match state.save_state(&self.layout_state_path) {
+            Ok(()) => {
+                self.layout_state = state;
+                self.layout_name = name.clone();
+                self.layout_modified = false;
+                self.layout_mode = false;
+                self.message = Some(match &self.layout_cfg.active {
+                    Some(a) => format!(
+                        "Saved layout '{name}', but your config sets layout.active = \"{a}\", which takes precedence at startup"
+                    ),
+                    None => format!("Saved layout '{name}'"),
+                });
+            }
+            Err(e) => {
+                self.message = Some(format!(
+                    "Cannot save layout to {}: {e}",
+                    self.layout_state_path.display()
+                ))
+            }
+        }
+    }
+
     fn cycle_focus(&mut self, dir: i32) {
-        let all = PanelKind::ALL;
+        let all: Vec<PanelKind> = if self.shown_panels.is_empty() {
+            PanelKind::ALL.to_vec()
+        } else {
+            self.shown_panels.clone()
+        };
         let i = all.iter().position(|p| *p == self.focus).unwrap_or(0) as i32;
         self.focus = all[(i + dir).rem_euclid(all.len() as i32) as usize];
     }

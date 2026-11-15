@@ -106,6 +106,7 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::Terminal;
+    use std::path::Path;
 
     const FIXTURES: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -137,6 +138,12 @@ mod tests {
     }
 
     fn app_at(dir: &str) -> App {
+        // A state path that never exists, so a user's saved layout can't leak in.
+        app_with(dir, "", Path::new("/nonexistent/cal-tui/layout.toml"))
+    }
+
+    /// `extra` is appended to the config (put tables after the uni table).
+    fn app_with(dir: &str, extra: &str, layout_state: &Path) -> App {
         let config: Config = toml::from_str(&format!(
             r#"
             calendars_dir = "{dir}"
@@ -144,11 +151,12 @@ mod tests {
             [calendars.uni]
             read_only = true
             hide_matching = ["^Tutorial group B"]
+            {extra}
             "#
         ))
         .unwrap();
         let store = Store::load_dir(dir.as_ref(), &config, Stockholm);
-        let mut app = App::new(config, store);
+        let mut app = App::with_layout_state(config, store, layout_state.to_path_buf());
         app.now_override = Some(Stockholm.with_ymd_and_hms(2026, 11, 16, 11, 32, 0).unwrap());
         app.date = NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
         app.refresh();
@@ -393,6 +401,99 @@ mod tests {
         let screen = render(&mut app);
         assert!(screen.contains("Lunch (theirs)"), "{screen}");
         assert!(screen.contains("changed on disk"), "{screen}");
+    }
+
+    #[test]
+    fn layout_mode_presets_and_arranging() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("layout.toml");
+        let mut app = app_with(FIXTURES, "", &state);
+        render(&mut app);
+        press(&mut app, 'w');
+        key(&mut app, KeyCode::Right);
+        assert_eq!(app.layout_name, "classic-left");
+        snapshot::assert_snapshot("tui_layout_mode", &render(&mut app));
+        key(&mut app, KeyCode::Right);
+        assert_eq!(app.layout_name, "three-columns");
+        snapshot::assert_snapshot("tui_layout_three_columns", &render(&mut app));
+
+        // Back to classic; hide the todo panel, make appointments narrower.
+        key(&mut app, KeyCode::Left);
+        key(&mut app, KeyCode::Left);
+        assert_eq!(app.layout_name, "classic");
+        render(&mut app);
+        key(&mut app, KeyCode::Tab);
+        key(&mut app, KeyCode::Tab);
+        assert_eq!(app.focus, layout::PanelKind::Todo);
+        press(&mut app, 'x');
+        assert_eq!(
+            app.focus,
+            layout::PanelKind::Appointments,
+            "focus moves off a hidden panel"
+        );
+        press(&mut app, '-');
+        assert!(app.layout_modified);
+        let screen = render(&mut app);
+        assert!(!screen.contains("TODO"), "{screen}");
+        assert!(screen.contains("classic (changed)"));
+
+        // Save: becomes "custom" and the default next time.
+        key(&mut app, KeyCode::Enter);
+        assert!(!app.layout_mode);
+        assert!(render(&mut app).contains("Saved layout 'custom'"));
+        let saved = std::fs::read_to_string(&state).unwrap();
+        assert!(saved.contains("active = \"custom\""), "{saved}");
+        let mut again = app_with(FIXTURES, "", &state);
+        assert_eq!(again.layout_name, "custom");
+        assert!(!render(&mut again).contains("TODO"));
+    }
+
+    #[test]
+    fn config_layout_beats_saved_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("layout.toml");
+        std::fs::write(&state, "[layout]\nactive = \"three-columns\"\n").unwrap();
+        // Saved layout used when the config says nothing.
+        assert_eq!(app_with(FIXTURES, "", &state).layout_name, "three-columns");
+        // A config preset (e.g. from Nix) wins.
+        let cfg = r#"
+            [layout]
+            active = "agenda"
+            [layout.presets.agenda]
+            split = "rows"
+            children = [ { panel = "appointments" }, { panel = "todo", size = 8 } ]
+        "#;
+        let mut app = app_with(FIXTURES, cfg, &state);
+        assert_eq!(app.layout_name, "agenda");
+        let screen = render(&mut app);
+        assert!(!screen.contains("Mo Tu We"), "no calendar panel:\n{screen}");
+        snapshot::assert_snapshot("tui_config_layout", &screen);
+        // Saving says that the config still decides.
+        press(&mut app, 'w');
+        key(&mut app, KeyCode::Enter);
+        assert!(render(&mut app).contains("takes precedence"));
+    }
+
+    #[test]
+    fn broken_layout_settings_do_not_stop_the_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("layout.toml");
+        std::fs::write(&state, "[layout]\nactive = 42\n").unwrap();
+        let mut app = app_with(FIXTURES, "", &state);
+        assert_eq!(app.layout_name, "classic");
+        assert!(render(&mut app).contains("Ignoring saved layout"));
+    }
+
+    #[test]
+    fn narrow_preset_from_config() {
+        let cfg = r#"
+            [layout]
+            narrow = { below_width = 120, preset = "three-columns" }
+        "#;
+        let mut app = app_with(FIXTURES, cfg, Path::new("/nonexistent/x.toml"));
+        // 110 columns is "narrow" here, so three-columns is used.
+        let screen = render(&mut app);
+        assert_eq!(app.shown_panels[0], layout::PanelKind::Calendar, "{screen}");
     }
 
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`

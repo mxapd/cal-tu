@@ -10,11 +10,8 @@ use ratatui::Frame;
 
 use super::app::{App, CalView, Pending, Popup};
 use super::form::{FieldId, Form};
-use super::layout::{Node, PanelKind};
+use super::layout::PanelKind;
 use crate::fmt::{humanize, parse_color, time_range, Rgb, TimeRange};
-
-/// Width below which the stacked layout is used.
-const NARROW: u16 = 70;
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let [main, status, keys] = Layout::vertical([
@@ -24,13 +21,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     ])
     .areas(f.area());
 
-    let layout = if main.width < NARROW {
-        Node::stacked()
-    } else {
-        app.layout.clone()
-    };
+    let layout = app.displayed_layout(main.width);
     let mut panels = Vec::new();
-    layout.resolve(main, &mut panels);
+    super::layout::resolve(&layout, main, &mut panels);
+    app.main_area = main;
+    app.shown_panels = panels.iter().map(|(k, _)| *k).collect();
     for (kind, area) in panels {
         match kind {
             PanelKind::Appointments => draw_appointments(f, app, area),
@@ -70,6 +65,23 @@ fn cal_style(app: &App, cal: usize) -> Style {
 
 fn panel_block(app: &App, kind: PanelKind, title: String) -> Block<'static> {
     let focused = app.focus == kind && app.popup.is_none();
+    if app.layout_mode {
+        // Layout mode: the panel being arranged stands out, others are quiet.
+        let block = Block::bordered()
+            .border_type(if focused {
+                BorderType::Double
+            } else {
+                BorderType::Rounded
+            })
+            .title(Line::from(format!(" {title} ")).alignment(Alignment::Center));
+        return if focused {
+            block
+                .border_style(Style::new().fg(Color::Yellow))
+                .title_style(Style::new().bold().fg(Color::Yellow))
+        } else {
+            block.border_style(Style::new().dark_gray())
+        };
+    }
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .title(Line::from(format!(" {title} ")).alignment(Alignment::Center));
@@ -320,6 +332,23 @@ fn draw_todo(f: &mut Frame, app: &mut App, area: Rect) {
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let now = app.now();
     let bar = Style::new().bg(Color::Indexed(236)).fg(Color::Gray);
+    if app.layout_mode {
+        let line = Line::from(vec![
+            Span::raw(" LAYOUT ").bold().black().on_yellow(),
+            Span::raw(format!(
+                " {}{}  ·  arranging: {}",
+                app.layout_name,
+                if app.layout_modified {
+                    " (changed)"
+                } else {
+                    ""
+                },
+                app.focus.name()
+            )),
+        ]);
+        f.render_widget(Paragraph::new(line).style(bar), area);
+        return;
+    }
     let mut spans = vec![
         Span::raw(format!(" {} ", now.format("%a %d %b %Y"))),
         Span::raw("│ "),
@@ -359,6 +388,18 @@ fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
     let hints: &[(&str, &str)] = match &app.popup {
+        None if app.layout_mode => &[
+            ("←/→", "Preset"),
+            ("Tab", "Panel"),
+            ("+/-", "Size"),
+            ("</>", "Column size"),
+            ("s", "Swap"),
+            ("r", "Rotate"),
+            ("x", "Hide"),
+            ("u", "Unhide"),
+            ("Enter", "Save"),
+            ("Esc", "Done"),
+        ],
         Some(Popup::Calendars { .. }) => &[("j/k", "Move"), ("Space", "Toggle"), ("Esc", "Close")],
         Some(Popup::Goto { .. }) => &[("Enter", "Go"), ("Esc", "Cancel")],
         Some(Popup::Form(_)) => &[
@@ -443,6 +484,10 @@ fn draw_help(f: &mut Frame) {
         ("S", "sync (runs sync_command), then reload"),
         ("R", "reload from disk"),
         ("W", "show loading warnings"),
+        (
+            "w",
+            "layout mode: presets, resize, swap, hide panels; Enter saves",
+        ),
         ("q", "quit"),
         ("", ""),
         (

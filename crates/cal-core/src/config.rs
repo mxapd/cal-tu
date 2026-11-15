@@ -21,7 +21,8 @@ pub struct Config {
     /// Per-calendar settings, keyed by folder name.
     #[serde(default)]
     pub calendars: BTreeMap<String, CalendarConfig>,
-    /// TUI layout (milestone 5); accepted but not interpreted yet.
+    /// TUI layouts; see `layout.rs`. Parsed by [`Config::layout`] so errors
+    /// can name the exact key.
     pub layout: Option<toml::Value>,
 }
 
@@ -75,6 +76,14 @@ impl Config {
         }
     }
 
+    /// The `[layout]` section (empty if absent).
+    pub fn layout(&self) -> std::result::Result<crate::layout::LayoutConfig, String> {
+        match &self.layout {
+            Some(v) => crate::layout::LayoutConfig::from_toml(v, "layout"),
+            None => Ok(Default::default()),
+        }
+    }
+
     /// Parse a config from TOML text (unknown keys are errors).
     pub fn from_toml(text: &str) -> Result<Config> {
         Ok(toml::from_str(text)?)
@@ -85,6 +94,9 @@ impl Config {
     /// Colours are checked by the UI layer, which owns their meaning.
     pub fn validate(&self) -> Vec<String> {
         let mut problems = Vec::new();
+        if let Err(e) = self.layout() {
+            problems.push(e);
+        }
         if let Some(z) = &self.timezone {
             if crate::time::resolve_tzid(z).is_none() {
                 problems.push(format!("timezone: unknown time zone '{z}'"));
