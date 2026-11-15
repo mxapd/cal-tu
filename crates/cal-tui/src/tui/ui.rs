@@ -316,7 +316,18 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
             app.date.format("%b %Y")
         ),
     };
+    // ‹ title › with clickable arrows (the title row is centred the same
+    // way panel_frame centres it).
+    let title = format!("‹  {title}  ›");
     let inner = panel_frame(f, app, PanelKind::Calendar, &title, area, true);
+    let shown = title.chars().count() as u16 + 2;
+    if area.width >= shown && area.height > 0 {
+        let x = area.x + (area.width - shown) / 2;
+        // Generous targets: the arrow plus the cells around it.
+        app.hits.push((Rect::new(x, area.y, 3, 1), Hit::Prev));
+        app.hits
+            .push((Rect::new(x + shown - 3, area.y, 3, 1), Hit::Next));
+    }
 
     let today = app.today();
     let focused = app.focus == PanelKind::Calendar;

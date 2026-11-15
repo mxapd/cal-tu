@@ -666,6 +666,34 @@ mod tests {
         assert!(matches!(app.popup, Some(app::Popup::Form(_))));
     }
 
+    #[test]
+    fn month_arrows() {
+        let mut app = app();
+        let screen = render(&mut app);
+        let rows: Vec<&str> = screen.lines().collect();
+        for (hit, arrow) in [(app::Hit::Prev, "‹"), (app::Hit::Next, "›")] {
+            let (r, _) = *app.hits.iter().find(|(_, h)| *h == hit).unwrap();
+            let cells: String = rows[r.y as usize]
+                .chars()
+                .skip(r.x as usize)
+                .take(r.width as usize)
+                .collect();
+            assert!(cells.contains(arrow), "{hit:?} region {cells:?}");
+        }
+        click_on(&mut app, app::Hit::Prev);
+        assert_eq!(app.date, day(10, 16));
+        assert!(render(&mut app).contains("‹  October 2026  ›"));
+        click_on(&mut app, app::Hit::Next);
+        render(&mut app);
+        click_on(&mut app, app::Hit::Next);
+        assert_eq!(app.date, day(12, 16));
+        // Week view: a week at a time.
+        press(&mut app, 'v');
+        render(&mut app);
+        click_on(&mut app, app::Hit::Next);
+        assert_eq!(app.date, day(12, 23));
+    }
+
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`
     #[test]
     #[ignore]

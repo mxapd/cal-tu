@@ -64,6 +64,9 @@ pub enum Hit {
     Todo(usize),
     /// Inside the open pop-up.
     Popup,
+    /// The ‹ and › next to the calendar title (previous / next month or week).
+    Prev,
+    Next,
     /// A row of the calendars pop-up.
     CalendarToggle(usize),
 }
@@ -72,7 +75,7 @@ impl Hit {
     fn panel(self) -> Option<PanelKind> {
         match self {
             Hit::Panel(p) => Some(p),
-            Hit::Day(_) | Hit::AgendaDay(_) => Some(PanelKind::Calendar),
+            Hit::Day(_) | Hit::AgendaDay(_) | Hit::Prev | Hit::Next => Some(PanelKind::Calendar),
             Hit::Appointment(_) => Some(PanelKind::Appointments),
             Hit::Todo(_) => Some(PanelKind::Todo),
             Hit::Popup | Hit::CalendarToggle(_) => None,
@@ -731,6 +734,14 @@ impl App {
                 }
             }
             Hit::Panel(p) => self.focus = p,
+            Hit::Prev | Hit::Next => {
+                let dir = if hit == Hit::Prev { -1 } else { 1 };
+                self.focus = PanelKind::Calendar;
+                match self.cal_view {
+                    CalView::Month => self.shift_months(dir),
+                    CalView::Week => self.shift_days(7 * dir as i64),
+                }
+            }
             Hit::Popup | Hit::CalendarToggle(_) => {}
         }
     }
