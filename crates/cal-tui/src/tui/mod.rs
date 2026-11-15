@@ -4,6 +4,10 @@ mod app;
 mod layout;
 mod ui;
 
+#[cfg(test)]
+#[path = "../../tests/support/snapshot.rs"]
+mod snapshot;
+
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -17,9 +21,14 @@ use app::{Action, App};
 /// How often to check the calendar folders for changes made by a sync.
 const CHANGE_CHECK: Duration = Duration::from_secs(3);
 
-pub fn run(config: Config) -> Result<()> {
+pub fn run(config: Config, now: Option<chrono::DateTime<chrono_tz::Tz>>) -> Result<()> {
     let store = Store::load(&config)?;
     let mut app = App::new(config, store);
+    if let Some(now) = now {
+        app.now_override = Some(now);
+        app.date = now.date_naive();
+        app.refresh();
+    }
     let mut terminal = ratatui::init();
     let result = event_loop(&mut terminal, &mut app);
     ratatui::restore();
@@ -120,7 +129,11 @@ mod tests {
     }
 
     fn render(app: &mut App) -> String {
-        let mut term = Terminal::new(TestBackend::new(110, 32)).unwrap();
+        render_size(app, 110, 32)
+    }
+
+    fn render_size(app: &mut App, w: u16, h: u16) -> String {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
         term.draw(|f| ui::draw(f, app)).unwrap();
         let buf = term.backend().buffer();
         let mut out = String::new();
@@ -159,6 +172,7 @@ mod tests {
             !screen.contains("Old task"),
             "completed todo hidden by default"
         );
+        snapshot::assert_snapshot("tui_main", &screen);
     }
 
     #[test]
@@ -191,6 +205,7 @@ mod tests {
         let screen = render(&mut app);
         assert!(screen.contains("Climbing (moved)"));
         assert!(screen.contains("yes (part of a series)"), "{screen}");
+        snapshot::assert_snapshot("tui_details_override", &screen);
     }
 
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`
@@ -208,7 +223,15 @@ mod tests {
     #[test]
     fn narrow_terminal_uses_stacked_layout() {
         let mut app = app();
-        let mut term = Terminal::new(TestBackend::new(50, 40)).unwrap();
-        term.draw(|f| ui::draw(f, &mut app)).unwrap();
+        snapshot::assert_snapshot("tui_narrow", &render_size(&mut app, 50, 40));
+    }
+
+    #[test]
+    fn week_view_and_help() {
+        let mut app = app();
+        press(&mut app, 'v');
+        snapshot::assert_snapshot("tui_week", &render(&mut app));
+        press(&mut app, '?');
+        snapshot::assert_snapshot("tui_help", &render(&mut app));
     }
 }

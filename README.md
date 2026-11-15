@@ -31,12 +31,44 @@ read_only = true
 hide_matching = ["^Tutorial group B"]
 ```
 
+Check a config without starting the app: `cal-tui check-config`.
+
+## Nix / home-manager
+
+```nix
+# flake inputs
+cal-tui.url = "path:/home/xam/Projects/cal-tui";   # or a git URL later
+cal-tui.inputs.nixpkgs.follows = "nixpkgs";
+
+# home-manager configuration
+imports = [ inputs.cal-tui.homeManagerModules.default ];
+programs.cal-tui = {
+  enable = true;
+  settings = {
+    timezone = "Europe/Stockholm";
+    default_calendar = "personal";
+    sync_command = "vdirsyncer sync";
+    calendars.uni = {
+      color = "cyan";
+      read_only = true;
+      hide_matching = [ "^Tutorial group B" ];
+    };
+  };
+};
+```
+
+This installs `cal-tui` and writes `~/.config/cal-tui/config.toml`. The file is
+checked with `cal-tui check-config` during the build, so mistakes fail the
+rebuild with a message naming the bad key.
+
 ## Development
 
 ```sh
 nix develop
-cargo build
-cargo test
+cargo test                       # all tests
+UPDATE_SNAPSHOTS=1 cargo test    # accept intended output changes, then git diff
+nix flake check                  # tests, clippy, rustfmt, home-manager module
+git config core.hooksPath .githooks   # optional: run checks before each commit
 ```
 
 See `examples/vdirsyncer.config` for syncing with Radicale and subscribing to a

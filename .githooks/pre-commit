@@ -1,0 +1,9 @@
+#!/bin/sh
+# Enable with: git config core.hooksPath .githooks
+# Runs the same checks as `nix flake check`, but faster (incremental cargo).
+set -e
+nix develop --quiet -c sh -c '
+  cargo fmt --all --check &&
+  cargo clippy --workspace --all-targets --quiet -- -D warnings &&
+  cargo test --workspace --quiet
+'

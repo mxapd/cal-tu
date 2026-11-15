@@ -69,6 +69,45 @@ impl Config {
         }
     }
 
+    /// Parse a config from TOML text (unknown keys are errors).
+    pub fn from_toml(text: &str) -> Result<Config> {
+        Ok(toml::from_str(text)?)
+    }
+
+    /// Problems that parsing alone does not catch: unknown time zone, bad
+    /// reminder offsets, invalid title filters, a read-only default calendar.
+    /// Colours are checked by the UI layer, which owns their meaning.
+    pub fn validate(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        if let Some(z) = &self.timezone {
+            if crate::time::resolve_tzid(z).is_none() {
+                problems.push(format!("timezone: unknown time zone '{z}'"));
+            }
+        }
+        for (id, cal) in &self.calendars {
+            if let Some(r) = &cal.default_reminder {
+                if parse_offset(r).is_none() {
+                    problems.push(format!(
+                        "calendars.{id}.default_reminder: cannot parse '{r}' (use e.g. 15m, 1h, 1h30m, 1d)"
+                    ));
+                }
+            }
+            for pat in &cal.hide_matching {
+                if let Err(e) = regex::Regex::new(pat) {
+                    problems.push(format!("calendars.{id}.hide_matching: '{pat}': {e}"));
+                }
+            }
+        }
+        if let Some(d) = &self.default_calendar {
+            if self.calendars.get(d).is_some_and(|c| c.read_only) {
+                problems.push(format!(
+                    "default_calendar: '{d}' is marked read_only, new items could not be saved"
+                ));
+            }
+        }
+        problems
+    }
+
     pub fn home_zone(&self) -> Result<Tz> {
         match &self.timezone {
             Some(z) => crate::time::resolve_tzid(z)
@@ -144,6 +183,25 @@ mod tests {
         assert!(c.calendars["uni"].read_only);
         assert!(c.calendars_dir().ends_with("cals"));
         assert!(toml::from_str::<Config>("typo_key = 1").is_err());
+        assert!(c.validate().is_empty());
+    }
+
+    #[test]
+    fn validate_reports_semantic_problems() {
+        let c = Config::from_toml(
+            r#"
+            timezone = "Mars/Olympus"
+            default_calendar = "uni"
+            [calendars.uni]
+            read_only = true
+            default_reminder = "soon"
+            hide_matching = ["(unclosed"]
+            "#,
+        )
+        .unwrap();
+        let p = c.validate();
+        assert_eq!(p.len(), 4, "{p:#?}");
+        assert!(p[0].starts_with("timezone"));
     }
 
     #[test]

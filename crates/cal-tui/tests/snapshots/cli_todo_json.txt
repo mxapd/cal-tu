@@ -1,0 +1,29 @@
+[
+  {
+    "calendar": "personal",
+    "uid": "todo-rent",
+    "summary": "Pay rent",
+    "description": null,
+    "priority": 1,
+    "due": "2026-11-18",
+    "completed": false
+  },
+  {
+    "calendar": "personal",
+    "uid": "todo-bike",
+    "summary": "Fix bike",
+    "description": null,
+    "priority": 5,
+    "due": null,
+    "completed": false
+  },
+  {
+    "calendar": "personal",
+    "uid": "todo-done",
+    "summary": "Old task",
+    "description": null,
+    "priority": 1,
+    "due": null,
+    "completed": true
+  }
+]
