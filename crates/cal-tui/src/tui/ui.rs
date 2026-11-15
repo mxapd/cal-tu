@@ -291,8 +291,10 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
         if inst.description.is_some() {
             flags.push('>');
         }
-        let tag = Span::styled(format!("  [{}]", cal.name), Style::new().dark_gray());
-        let summary = Span::styled(inst.summary.clone(), cal_style(app, inst.calendar));
+        // Titles in bold normal text for contrast; the calendar colour goes on
+        // the bullet and the tag.
+        let tag = Span::styled(format!("  [{}]", cal.name), cal_style(app, inst.calendar));
+        let summary = Span::styled(inst.summary.clone(), Style::new().bold());
         let range = time_range(inst, app.date, home);
         let start_row = lines.len();
 
@@ -321,11 +323,11 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
                 lines.push(Line::from(vec![
                     Span::styled(format!(" {bullet} "), cal_style(app, inst.calendar)),
                     Span::raw(range.arrow()),
-                    Span::raw(format!(" {flags}")).dark_gray(),
+                    Span::raw(format!(" {flags}")).fg(Color::Indexed(246)),
                 ]));
                 let mut spans = vec![Span::raw("   "), summary];
                 if let Some(loc) = &inst.location {
-                    spans.push(Span::raw(format!(" · {loc}")).dark_gray());
+                    spans.push(Span::raw(format!(" · {loc}")).fg(Color::Indexed(250)));
                 }
                 spans.push(tag);
                 lines.push(Line::from(spans));

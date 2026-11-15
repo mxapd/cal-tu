@@ -813,6 +813,35 @@ mod tests {
         assert!(!render(&mut app).contains("°–"));
     }
 
+    #[test]
+    fn appointment_titles_have_contrast() {
+        use ratatui::style::{Color, Modifier};
+        let mut app = app();
+        let mut term = Terminal::new(TestBackend::new(110, 32)).unwrap();
+        term.draw(|f| ui::draw(f, &mut app)).unwrap();
+        let buf = term.backend().buffer();
+        // Find "Lunch with Anna" and the "[personal]" tag after it.
+        let find = |needle: &str| {
+            for y in 0..buf.area.height {
+                let row: String = (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect();
+                if let Some(i) = row.find(needle) {
+                    let x = row[..i].chars().count() as u16;
+                    return buf[(x, y)].clone();
+                }
+            }
+            panic!("{needle} not on screen");
+        };
+        let title = find("Lunch with Anna");
+        assert!(title.modifier.contains(Modifier::BOLD));
+        assert_eq!(
+            title.fg,
+            Color::Reset,
+            "normal text colour, not the calendar's"
+        );
+        let tag = find("[personal]");
+        assert_ne!(tag.fg, Color::Reset, "tag carries the calendar colour");
+    }
+
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`
     /// (set CAL_TUI_SCREEN_DIR to render a real calendars folder instead).
     #[test]
