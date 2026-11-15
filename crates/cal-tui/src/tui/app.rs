@@ -90,6 +90,8 @@ pub struct App {
 
     // Derived data, rebuilt by `refresh`.
     pub day_items: Vec<Instance>,
+    /// Items in the two weeks after the selected day (calendar panel agenda).
+    pub upcoming: Vec<Instance>,
     pub todos: Vec<Todo>,
     /// Calendars with items on each day of the visible calendar range.
     pub marks: BTreeMap<NaiveDate, Vec<usize>>,
@@ -140,6 +142,7 @@ impl App {
             shown_panels: Vec::new(),
             now_override: None,
             day_items: Vec::new(),
+            upcoming: Vec::new(),
             todos: Vec::new(),
             marks: BTreeMap::new(),
             warnings: Vec::new(),
@@ -197,6 +200,13 @@ impl App {
     pub fn refresh(&mut self) {
         let (items, mut warnings) = self.store.day(self.date);
         self.day_items = items;
+        let next = self.date + Duration::days(1);
+        let (upcoming, w) = self.store.instances(
+            self.store.day_start(next),
+            self.store.day_start(next + Duration::days(14)),
+        );
+        self.upcoming = upcoming;
+        warnings.extend(w);
         self.appt_sel = self.appt_sel.min(self.day_items.len().saturating_sub(1));
 
         self.todos = self

@@ -1,4 +1,4 @@
- Appointments · today                                                  │          Week 47 · Nov 2026          
+                         Appointments · today                          │          Week 47 · Nov 2026          
  Monday, November 16, 2026                                             │  Mon 16  ● ●                         
                                                                        │                                      
  ○ 08:15 -> 10:00 *                                                    │  Tue 17  ●                           
@@ -12,12 +12,12 @@
                                                                        │  Sat 21  ●                           
                                                                        │                                      
                                                                        │  Sun 22  ●                           
+                                                                       │                                      
+                                                                       │                                      
                                                                        ├──────────────────────────────────────
-                                                                       │ Todo                                 
+                                                                       │                 Todo                 
                                                                        │ 1. Pay rent 18 Nov                   
                                                                        │ 5. Fix bike                          
-                                                                       │                                      
-                                                                       │                                      
                                                                        │                                      
                                                                        │                                      
                                                                        │                                      

@@ -1,4 +1,4 @@
- Appointments · today                                                  │          Week 47 · Nov 2026          
+                         Appointments · today                          │          Week 47 · Nov 2026          
  Monday, November 16, 2026                                             │  Mon 16  ● ●                         
                                                                        │                                      
  ○ 08:15 -> 10:00 ┌───────────────────────────────── Help ─────────────────────────────────┐                  
@@ -12,10 +12,10 @@
                   │ Enter             show details of the selected item                    │                  
                   │ a                 add an event (todo panel: a todo)                    │                  
                   │ e                 edit the selected item                               │                  
-                  │ d                 delete the selected item                             │──────────────────
+                  │ d                 delete the selected item                             │                  
                   │ x, Space          todo: mark done / not done                           │                  
-                  │ + / -             todo: raise / lower priority                         │                  
-                  │ v                 switch month / week view                             │                  
+                  │ + / -             todo: raise / lower priority                         │──────────────────
+                  │ v                 switch month / week view                             │o                 
                   │ c                 show / hide calendars                                │                  
                   │ C                 show / hide completed todos                          │                  
                   │ S                 sync (runs sync_command), then reload                │                  

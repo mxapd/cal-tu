@@ -198,7 +198,7 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         "Appointments".to_string()
     };
-    let inner = panel_frame(f, app, PanelKind::Appointments, &title, area, false);
+    let inner = panel_frame(f, app, PanelKind::Appointments, &title, area, true);
 
     let focused = app.focus == PanelKind::Appointments;
     let home = app.store.home;
@@ -311,50 +311,108 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
 
     let lines: Vec<Line> = match app.cal_view {
         CalView::Month => {
-            // Day columns as wide as the panel allows (3–6 cells), centred.
-            let cw = (inner.width / 7).clamp(3, 6) as usize;
-            let pad = " ".repeat((inner.width as usize).saturating_sub(cw * 7) / 2);
-            // A blank line between weeks when there is room for it.
-            let gap = inner.height > 6 * 2; // header row + 6 weeks × 2
-                                            // A cell: the 2-digit text centred, with one space of highlight
-                                            // on each side when the cell is wide enough.
-            let cell = |text: String, style: Style| -> Vec<Span<'static>> {
-                let left = (cw - 2) / 2;
-                let right = cw - 2 - left;
-                if left >= 1 && right >= 1 {
-                    vec![
-                        Span::raw(" ".repeat(left - 1)),
-                        Span::styled(format!(" {text} "), style),
-                        Span::raw(" ".repeat(right - 1)),
-                    ]
-                } else {
-                    vec![
-                        Span::raw(" ".repeat(left)),
-                        Span::styled(text, style),
-                        Span::raw(" ".repeat(right)),
-                    ]
-                }
-            };
             let (start, _) = app.visible_range();
-            let mut header = vec![Span::raw(pad.clone())];
+            let home = app.store.home;
+            // Week-number column, then seven day cells (4 wide, 3 if tight),
+            // centred in the panel.
+            let cw: usize = if inner.width as usize >= 3 + 7 * 4 {
+                4
+            } else {
+                3
+            };
+            let grid_w = 3 + 7 * cw;
+            let pad = " ".repeat((inner.width as usize).saturating_sub(grid_w) / 2);
+            let label = Style::new().fg(Color::Indexed(244));
+            let dim = Style::new().fg(Color::Indexed(240));
+            let day_cell = |d: NaiveDate| -> Vec<Span<'static>> {
+                let mut text = if d.month() != app.date.month() {
+                    dim
+                } else {
+                    match app.marks.get(&d).and_then(|c| c.first()) {
+                        Some(cal) => cal_style(app, *cal).bold(),
+                        None => Style::new(),
+                    }
+                };
+                if d == today {
+                    text = text.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
+                }
+                let mut around = Style::new();
+                if d == app.date {
+                    let bg = if focused {
+                        Color::Indexed(24)
+                    } else {
+                        Color::Indexed(236)
+                    };
+                    around = around.bg(bg);
+                    text = text.bg(bg).add_modifier(Modifier::BOLD);
+                }
+                vec![
+                    Span::styled(" ", around),
+                    Span::styled(format!("{:>2}", d.day()), text),
+                    Span::styled(" ".repeat(cw - 3), around),
+                ]
+            };
+
+            let mut header = vec![Span::raw(pad.clone()), Span::styled(" v ", label)];
             for name in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] {
-                header.extend(cell(name.into(), Style::new().fg(Color::Indexed(244))));
+                header.push(Span::styled(
+                    format!(" {name}{}", " ".repeat(cw - 3)),
+                    label,
+                ));
             }
             let mut lines = vec![Line::from(header)];
             for week in 0..6 {
-                if gap {
-                    lines.push(Line::from(""));
-                }
-                let mut spans = vec![Span::raw(pad.clone())];
+                let monday = start + Duration::days(week * 7);
+                let mut spans = vec![
+                    Span::raw(pad.clone()),
+                    Span::styled(format!("{:>2} ", monday.iso_week().week()), label),
+                ];
                 for wd in 0..7 {
-                    let d = start + Duration::days(week * 7 + wd);
-                    if d.month() == app.date.month() {
-                        spans.extend(cell(format!("{:>2}", d.day()), day_style(d)));
-                    } else {
-                        spans.push(Span::raw(" ".repeat(cw)));
-                    }
+                    spans.extend(day_cell(monday + Duration::days(wd)));
                 }
                 lines.push(Line::from(spans));
+            }
+
+            // Below the grid: what comes after the selected day.
+            let room = (inner.height as usize).saturating_sub(lines.len());
+            if room >= 3 {
+                lines.push(
+                    Line::from(format!(
+                        " {}",
+                        "─".repeat(inner.width.saturating_sub(2) as usize)
+                    ))
+                    .style(dim),
+                );
+                if app.upcoming.is_empty() {
+                    lines.push(Line::from(" nothing in the next two weeks").style(dim));
+                }
+                let from = app.date + Duration::days(1);
+                let mut last_day = None;
+                for i in &app.upcoming {
+                    if lines.len() >= inner.height as usize {
+                        break;
+                    }
+                    let day = i.start.date_in(home).max(from);
+                    let date = if last_day != Some(day) {
+                        Span::styled(format!(" {}  ", day.format("%a %d")), label)
+                    } else {
+                        Span::raw(" ".repeat(9))
+                    };
+                    last_day = Some(day);
+                    let when = if i.kind == Kind::Todo {
+                        "due".to_string()
+                    } else if i.all_day {
+                        "all day".to_string()
+                    } else {
+                        i.start.instant(home).format("%H:%M").to_string()
+                    };
+                    lines.push(Line::from(vec![
+                        date,
+                        Span::styled("● ", cal_style(app, i.calendar)),
+                        Span::styled(format!("{when} "), label),
+                        Span::raw(i.summary.clone()),
+                    ]));
+                }
             }
             lines
         }
@@ -389,7 +447,7 @@ fn draw_todo(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         "Todo"
     };
-    let inner = panel_frame(f, app, PanelKind::Todo, title, area, false);
+    let inner = panel_frame(f, app, PanelKind::Todo, title, area, true);
 
     let focused = app.focus == PanelKind::Todo;
     let mut lines = Vec::new();

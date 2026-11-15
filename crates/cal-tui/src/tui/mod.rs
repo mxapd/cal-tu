@@ -339,10 +339,11 @@ mod tests {
         press(&mut app, 'j'); // climbing
         press(&mut app, 'd');
         press(&mut app, 'o');
-        assert!(!render(&mut app).contains("Climbing"));
+        let today = |app: &App| app.day_items.iter().any(|i| i.summary == "Climbing");
+        assert!(!today(&app));
         press(&mut app, 'l');
         press(&mut app, 'l');
-        assert!(render(&mut app).contains("Climbing"), "next one remains");
+        assert!(today(&app), "next one remains");
     }
 
     #[test]

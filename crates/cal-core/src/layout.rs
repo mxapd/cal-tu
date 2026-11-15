@@ -77,9 +77,9 @@ pub enum Node {
     Split(Dir, Size, Vec<Node>),
 }
 
-/// Height of the month calendar: title, weekday header, six weeks with a
-/// blank line between them, and the divider below.
-pub const CALENDAR_HEIGHT: u16 = 15;
+/// Height of the calendar panel: title, weekday header, six weeks, a short
+/// agenda of the following days, and the divider below.
+pub const CALENDAR_HEIGHT: u16 = 17;
 
 /// Width of the side column (calendar + todo) in the built-in presets, including
 /// the divider: seven 5-cell day columns plus margins.
