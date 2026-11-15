@@ -1,5 +1,5 @@
  Monday 16 November · today                                        │         ‹  Week 47 · Nov 2026  ›         
- 08:00│▌ Linear Algebra  08:15–10:00                               │  Mon 16  ● ●                             
+ 08:00▲▌ Linear Algebra  08:15–10:00                               │  Mon 16  ● ●                             
       │▌ Hall A · lecture ↻  University                            │                                          
  09:00│▌                                                           │  Tue 17  ●                               
       │▌                                                           │                                          
@@ -27,6 +27,6 @@
       │                                                            │                                          
  21:00│                                                            │                                          
       │                                                            │                                          
-                                                                   │                                          
+ 22:00▼                                                            │                                          
  Mon 16 Nov 2026 │ 11:32 │ ● personal ● University │ next: Lunch with Anna in 28m │ ⚠ 3 (W)                   
  ? Help  Tab Panel  h/l Day  j/k Move  g Goto  t Today  a Add  e Edit  d Delete  Enter View  S Sync  q Quit   

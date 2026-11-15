@@ -125,6 +125,11 @@ pub struct App {
     pub hits: Vec<(Rect, Hit)>,
     /// Weather forecast, if `[weather]` is configured.
     pub weather: Option<crate::weather::Weather>,
+    /// Hour-grid scroll position set by the user (rows from 00:00); `None`
+    /// follows the selection / now.
+    pub day_scroll: Option<u32>,
+    /// Set while drawing: (offset, rows per hour, largest offset).
+    pub day_view: (u32, u32, u32),
     /// Divider being dragged with the mouse.
     dragging: Option<(PanelKind, Dir)>,
     /// Fixed "now" for tests.
@@ -184,6 +189,8 @@ impl App {
             shown_panels: Vec::new(),
             hits: Vec::new(),
             dragging: None,
+            day_scroll: None,
+            day_view: (0, 1, 0),
             weather: None,
             now_override: None,
             day_items: Vec::new(),
@@ -339,6 +346,7 @@ impl App {
         if d != self.date {
             self.date = d;
             self.appt_sel = 0;
+            self.day_scroll = None;
             self.refresh();
         }
     }
@@ -390,6 +398,8 @@ impl App {
             KeyCode::Char('L') => self.shift_days(7),
             KeyCode::Char('[') => self.shift_months(-1),
             KeyCode::Char(']') => self.shift_months(1),
+            KeyCode::Char('J') | KeyCode::PageDown => self.scroll_day(1),
+            KeyCode::Char('K') | KeyCode::PageUp => self.scroll_day(-1),
             KeyCode::Char('j') | KeyCode::Down => self.move_vertical(1),
             KeyCode::Char('k') | KeyCode::Up => self.move_vertical(-1),
             KeyCode::Char('t') => self.set_date(self.today()),
@@ -660,6 +670,14 @@ impl App {
 
     // --- mouse -------------------------------------------------------------------
 
+    /// Scroll the hour grid by `dir` hours.
+    fn scroll_day(&mut self, dir: i32) {
+        let (offset, rph, max) = self.day_view;
+        let base = self.day_scroll.unwrap_or(offset) as i64;
+        let new = (base + dir as i64 * rph as i64).clamp(0, max as i64);
+        self.day_scroll = Some(new as u32);
+    }
+
     fn toggle_calendar(&mut self, i: usize) {
         if let Some(cal) = self.store.calendars.get(i) {
             let id = cal.id.clone();
@@ -807,9 +825,7 @@ impl App {
                 CalView::Month => self.shift_months(dir),
                 CalView::Week => self.shift_days(7 * dir as i64),
             },
-            Some(PanelKind::Appointments) => {
-                self.appt_sel = step(self.appt_sel, dir, self.day_items.len());
-            }
+            Some(PanelKind::Appointments) => self.scroll_day(dir),
             Some(PanelKind::Todo) => {
                 self.todo_sel = step(self.todo_sel, dir, self.todos.len());
             }
@@ -991,6 +1007,7 @@ impl App {
             PanelKind::Calendar => self.shift_days(7 * dir as i64),
             PanelKind::Appointments => {
                 self.appt_sel = step(self.appt_sel, dir, self.day_items.len());
+                self.day_scroll = None; // the view follows the selection again
             }
             PanelKind::Todo => {
                 self.todo_sel = step(self.todo_sel, dir, self.todos.len());

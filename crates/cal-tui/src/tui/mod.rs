@@ -649,14 +649,43 @@ mod tests {
         assert_eq!(app.date, day(12, 16));
         mouse(&mut app, MouseEventKind::ScrollUp, cal.x + 2, cal.y + 2);
         assert_eq!(app.date, day(11, 16));
+    }
+
+    #[test]
+    fn hour_grid_scrolls_over_the_whole_day() {
+        let mut app = app();
+        let screen = render(&mut app);
+        assert!(!screen.contains(" 00:00"), "starts at the usual hours");
+        assert!(screen.contains(" 08:00"));
         let (appts, _) = app.hits[0];
-        mouse(
-            &mut app,
-            MouseEventKind::ScrollDown,
-            appts.x + 2,
-            appts.y + 3,
-        );
-        assert_eq!(app.appt_sel, 1);
+        // Wheel up over the appointments: an hour per notch, until 00:00.
+        for _ in 0..12 {
+            mouse(
+                &mut app,
+                MouseEventKind::ScrollUp,
+                appts.x + 10,
+                appts.y + 5,
+            );
+            render(&mut app);
+        }
+        let screen = render(&mut app);
+        assert!(screen.contains(" 00:00"), "{screen}");
+        assert_eq!(app.appt_sel, 0, "scrolling does not change the selection");
+        // To the end of the day with the keyboard.
+        for _ in 0..30 {
+            press(&mut app, 'J');
+            render(&mut app);
+        }
+        let screen = render(&mut app);
+        assert!(screen.contains(" 23:00"), "{screen}");
+        assert!(screen.contains('▲') && !screen.contains('▼'), "{screen}");
+        // Moving the selection brings the view back to it.
+        press(&mut app, 'j');
+        assert!(render(&mut app).contains("Lunch with Anna"));
+        // Another day starts at the usual position again.
+        press(&mut app, 'J');
+        press(&mut app, 'l');
+        assert!(render(&mut app).contains(" 08:00"));
     }
 
     #[test]

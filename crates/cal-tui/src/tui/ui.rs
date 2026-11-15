@@ -409,6 +409,8 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
 
     // The hour grid.
     let grid = Rect::new(inner.x, y, inner.width, inner.bottom().saturating_sub(y));
+    // (offset, rows per hour, largest offset) of the hour grid, for scrolling.
+    let mut day_view = (0u32, 1u32, 0u32);
     if grid.height >= 2 {
         let day_start = app.store.day_start(app.date);
         let day_end = app.store.day_start(app.date + Duration::days(1));
@@ -427,46 +429,38 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
                 (i, s, e)
             })
             .collect();
-        let mut first = DAY_FIRST_HOUR;
-        let mut last = DAY_LAST_HOUR;
+        // The whole day (00–24) can be scrolled. Density is chosen so the
+        // usual hours (08–20, widened for events) fit the panel.
+        let mut want_first = DAY_FIRST_HOUR;
+        let mut want_last = DAY_LAST_HOUR;
         for &(_, s, e) in &spans_min {
-            first = first.min(s / 60);
-            last = last.max(e.div_ceil(60));
+            want_first = want_first.min(s / 60);
+            want_last = want_last.max(e.div_ceil(60));
         }
         let now_min = is_today.then(|| minutes(now));
-        if let Some(n) = now_min {
-            first = first.min(n / 60);
-            last = last.max(n / 60 + 1);
-        }
-        let mut last = last.min(24);
-        let rph = (grid.height as u32 / (last - first)).clamp(1, 4);
-        // Use leftover rows for more hours: the evening first, then the morning.
-        let fits = grid.height as u32 / rph;
-        while last - first < fits && last < 24 {
-            last += 1;
-        }
-        while last - first < fits && first > 0 {
-            first -= 1;
-        }
-        let hours = last - first;
+        let span_hours = (want_last.min(24) - want_first).max(1);
+        let rph = (grid.height as u32 / span_hours).clamp(1, 4);
+        let first = 0u32;
         let slot = 60 / rph;
-        let total = hours * rph;
-        let row_of = |m: u32| (m.saturating_sub(first * 60)) / slot;
+        let total = 24 * rph;
+        let row_of = |m: u32| m / slot;
+        let view = grid.height as u32;
+        let max_offset = total.saturating_sub(view);
 
-        // Scroll so the selected item (or now) is in view when it does not fit.
+        // Automatic position: the usual hours, unless the selected event (or
+        // now) would be outside them; then that, a third from the top.
+        let base = row_of(want_first * 60);
         let focus_row = spans_min
             .iter()
             .find(|(i, _, _)| *i == app.appt_sel)
             .map(|(_, s, _)| row_of(*s))
-            .or(now_min.map(row_of))
-            .unwrap_or(0);
-        let offset = if total > grid.height as u32 {
-            focus_row
-                .saturating_sub(grid.height as u32 / 3)
-                .min(total - grid.height as u32)
-        } else {
-            0
+            .or(now_min.map(row_of));
+        let auto = match focus_row {
+            Some(r) if r < base || r >= base + view => r.saturating_sub(view / 3),
+            _ => base,
         };
+        let offset = app.day_scroll.unwrap_or(auto).min(max_offset);
+        day_view = (offset, rph, max_offset);
 
         // Hour labels and the rule.
         const LABEL_W: u16 = 6;
@@ -489,6 +483,15 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
                 "│",
                 Style::new().fg(Color::Indexed(240)),
             );
+        }
+
+        // More hours above / below.
+        let more = Style::new().fg(Color::Indexed(250));
+        if offset > 0 {
+            buf.set_string(grid.x + LABEL_W, grid.y, "▲", more);
+        }
+        if offset < max_offset {
+            buf.set_string(grid.x + LABEL_W, grid.bottom() - 1, "▼", more);
         }
 
         // Lanes for overlapping events. Events are grouped into clusters that
@@ -617,6 +620,7 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
     app.hits.extend(hits);
+    app.day_view = day_view;
 }
 
 fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
@@ -1066,6 +1070,10 @@ fn draw_help(f: &mut Frame) {
         ("H / L", "previous / next week"),
         ("[ / ]", "previous / next month"),
         ("j / k, ↓ / ↑", "move selection (calendar panel: week)"),
+        (
+            "J / K, PgDn / PgUp",
+            "scroll the day's hours (also the mouse wheel)",
+        ),
         ("Tab / Shift-Tab", "next / previous panel"),
         ("t", "go to today"),
         ("g", "go to date (2026-12-24, 12-24, 24, +7, -7)"),
