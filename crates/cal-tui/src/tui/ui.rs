@@ -81,16 +81,12 @@ pub fn color(c: Option<&str>) -> Option<Color> {
     })
 }
 
-/// Colours for calendars without one of their own, chosen by a stable hash of
-/// the folder name so a calendar keeps its colour.
-const PALETTE: [Color; 6] = [
-    Color::LightCyan,
-    Color::LightMagenta,
-    Color::LightYellow,
-    Color::LightGreen,
-    Color::LightBlue,
-    Color::LightRed,
-];
+/// Calendars without a colour of their own get one of the soft colours,
+/// chosen by a stable hash of the folder name so a calendar keeps its colour.
+fn palette(i: usize) -> Color {
+    let (_, (r, g, b)) = crate::fmt::SOFT[i % crate::fmt::SOFT.len()];
+    Color::Rgb(r, g, b)
+}
 
 /// A calendar's colour: configured (or from the vdir `color` file), else
 /// one from the palette.
@@ -100,7 +96,7 @@ pub fn cal_color(app: &App, cal: usize) -> Color {
         let h =
             c.id.bytes()
                 .fold(0usize, |h, b| h.wrapping_mul(31).wrapping_add(b as usize));
-        PALETTE[h % PALETTE.len()]
+        palette(h)
     })
 }
 
@@ -409,26 +405,18 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
         CalView::Month => {
             let (start, _) = app.visible_range();
             let home = app.store.home;
-            // Week-number column, then seven day cells (4 wide, 3 if tight),
-            // centred in the panel.
-            let cw: usize = if inner.width as usize >= 3 + 7 * 4 {
-                4
-            } else {
-                3
-            };
+            // Week-number column, then seven day cells centred in the panel:
+            // 5 wide (room for two calendar dots), 4 (one dot), or 3 if tight.
+            let cw: usize = (inner.width.saturating_sub(3) as usize / 7).clamp(3, 5);
             let grid_w = 3 + 7 * cw;
             let pad = " ".repeat((inner.width as usize).saturating_sub(grid_w) / 2);
             let label = Style::new().fg(Color::Indexed(244));
             let dim = Style::new().fg(Color::Indexed(240));
             let day_cell = |d: NaiveDate| -> Vec<Span<'static>> {
-                let mut text = if d.month() != app.date.month() {
-                    dim
-                } else {
-                    match app.marks.get(&d).and_then(|c| c.first()) {
-                        Some(cal) => cal_style(app, *cal).bold(),
-                        None => Style::new(),
-                    }
-                };
+                let other_month = d.month() != app.date.month();
+                // Numbers stay in the normal text colour; the dots carry the
+                // calendar colours.
+                let mut text = if other_month { dim } else { Style::new() };
                 if d == today {
                     text = text.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
                 }
@@ -442,24 +430,27 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                     around = around.bg(bg);
                     text = text.bg(bg).add_modifier(Modifier::BOLD);
                 }
-                // A dot after the number marks days with items, in the colour
-                // of the (first) calendar involved.
-                let dot = match app.marks.get(&d).and_then(|c| c.first()) {
-                    Some(cal) if cw >= 4 => {
-                        let c = if d.month() != app.date.month() {
-                            Color::Indexed(240)
-                        } else {
-                            cal_color(app, *cal)
-                        };
-                        Span::styled("•", around.fg(c))
-                    }
-                    _ => Span::styled(" ".repeat(cw - 3), around),
-                };
-                vec![
+                let mut cell = vec![
                     Span::styled(" ", around),
                     Span::styled(format!("{:>2}", d.day()), text),
-                    dot,
-                ]
+                ];
+                // One dot per calendar with items that day, as many as fit.
+                let slots = cw - 3;
+                let cals = app.marks.get(&d).map(Vec::as_slice).unwrap_or(&[]);
+                for i in 0..slots {
+                    cell.push(match cals.get(i) {
+                        Some(cal) => {
+                            let c = if other_month {
+                                Color::Indexed(240)
+                            } else {
+                                cal_color(app, *cal)
+                            };
+                            Span::styled("•", around.fg(c))
+                        }
+                        None => Span::styled(" ", around),
+                    });
+                }
+                cell
             };
 
             let mut header = vec![Span::raw(pad.clone()), Span::styled(" v ", label)];
@@ -496,25 +487,44 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
             // calendar's colour, so titles get most of the width.
             let room = (inner.height as usize).saturating_sub(lines.len());
             if room >= 3 {
-                lines.push(
-                    Line::from(format!(
-                        " {}",
-                        "─".repeat(inner.width.saturating_sub(2) as usize)
-                    ))
-                    .style(dim),
-                );
+                // Week separators double as labels: "── This week ───".
+                let monday =
+                    |d: NaiveDate| d - Duration::days(d.weekday().num_days_from_monday() as i64);
+                let this_week = monday(today);
+                let rule = |week: NaiveDate| {
+                    let name = if week == this_week {
+                        "This week".to_string()
+                    } else if week == this_week + Duration::days(7) {
+                        "Next week".to_string()
+                    } else if week == this_week - Duration::days(7) {
+                        "Last week".to_string()
+                    } else {
+                        format!("Week {}", week.iso_week().week())
+                    };
+                    let text = format!(" ── {name} ");
+                    let fill = (inner.width as usize).saturating_sub(text.chars().count() + 1);
+                    Line::from(format!("{text}{}", "─".repeat(fill))).style(dim)
+                };
+                let from = app.date + Duration::days(1);
                 if app.upcoming.is_empty() {
+                    lines.push(rule(monday(from)));
                     lines.push(Line::from(" nothing in the next two weeks").style(dim));
                 }
-                let from = app.date + Duration::days(1);
                 let title_w = (inner.width as usize).saturating_sub(9);
                 let mut last_day = None;
+                let mut last_week = None;
                 for i in &app.upcoming {
                     let day = i.start.date_in(home).max(from);
                     if last_day != Some(day) {
-                        // A header without room for one item under it is pointless.
-                        if lines.len() + 2 > inner.height as usize {
+                        let new_week = last_week != Some(monday(day));
+                        // Only start a day if one item fits under its header.
+                        let needed = if new_week { 3 } else { 2 };
+                        if lines.len() + needed > inner.height as usize {
                             break;
+                        }
+                        if new_week {
+                            last_week = Some(monday(day));
+                            lines.push(rule(monday(day)));
                         }
                         last_day = Some(day);
                         if let Some(r) = row_rect(lines.len()) {

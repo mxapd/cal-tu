@@ -78,6 +78,18 @@ pub enum Rgb {
     True(u8, u8, u8),
 }
 
+/// Muted colours that sit well on dark and light backgrounds. Usable by name
+/// in the config, and used for calendars without a colour of their own.
+pub const SOFT: [(&str, (u8, u8, u8)); 7] = [
+    ("orange", (215, 135, 95)),
+    ("teal", (95, 175, 175)),
+    ("lavender", (175, 135, 215)),
+    ("sage", (135, 175, 135)),
+    ("sky", (95, 135, 175)),
+    ("rose", (215, 135, 135)),
+    ("sand", (215, 175, 95)),
+];
+
 pub fn parse_color(c: Option<&str>) -> Option<Rgb> {
     let c = c?.trim();
     if let Some(hex) = c.strip_prefix('#') {
@@ -87,7 +99,11 @@ pub fn parse_color(c: Option<&str>) -> Option<Rgb> {
         }
         return None;
     }
-    let n = match c.to_ascii_lowercase().as_str() {
+    let lower = c.to_ascii_lowercase();
+    if let Some((_, rgb)) = SOFT.iter().find(|(name, _)| *name == lower) {
+        return Some(Rgb::True(rgb.0, rgb.1, rgb.2));
+    }
+    let n = match lower.as_str() {
         "black" => 0,
         "red" => 1,
         "green" => 2,

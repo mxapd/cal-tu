@@ -224,7 +224,7 @@ fn check_config(config: &Config) -> Vec<String> {
         if let Some(c) = &cal.color {
             if fmt::parse_color(Some(c)).is_none() {
                 problems.push(format!(
-                    "calendars.{id}.color: unknown colour '{c}' (use a name like cyan or #rrggbb)"
+                    "calendars.{id}.color: unknown colour '{c}' (use orange, teal, lavender, sage, sky, rose, sand, an ANSI name like cyan, or #rrggbb)"
                 ));
             }
         }

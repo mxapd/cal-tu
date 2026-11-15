@@ -82,8 +82,9 @@ pub enum Node {
 pub const CALENDAR_HEIGHT: u16 = 17;
 
 /// Width of the side column (calendar + todo) in the built-in presets, including
-/// the divider: seven 5-cell day columns plus margins.
-pub const SIDE_WIDTH: u16 = 38;
+/// the divider: week numbers and seven 5-cell day columns (room for two
+/// calendar dots per day).
+pub const SIDE_WIDTH: u16 = 42;
 
 /// Names of the built-in presets, in cycling order.
 pub const BUILTIN: [&str; 4] = ["classic", "classic-left", "three-columns", "stacked"];

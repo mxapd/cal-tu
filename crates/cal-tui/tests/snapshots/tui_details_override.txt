@@ -1,32 +1,32 @@
- Appointments                                                          │          ‹  October 2026  ›          
- Thursday, October 29, 2026                                            │    v  Mo  Tu  We  Th  Fr  Sa  Su     
-                                                                       │   40  28• 29  30   1   2   3   4     
- ● 19:00 -> 20:30 *                                                    │   41   5•  6   7•  8   9  10  11     
-   Climbing (moved)  [personal]                                        │   42  12• 13  14• 15  16  17  18     
-                                                                       │   43  19• 20  21  22  23  24  25     
-                                                                       │   44  26• 27  28  29• 30  31   1•    
-                                                                       │   45   2•  3   4   5   6   7   8•    
-                                                                       │ ──────────────────────────────────── 
-                                                                       │ Sunday 1 Nov                         
-                                                                       │        Reading week                  
-                                                                       │ Monday 2 Nov                         
-                    ┌───────────────────────── Climbing (moved) ─────────────────────────┐ebra, lecture       
-                    │ Calendar  personal                                                 │                    
+ Appointments                                                      │            ‹  October 2026  ›            
+ Thursday, October 29, 2026                                        │   v  Mo   Tu   We   Th   Fr   Sa   Su    
+                                                                   │  40  28•  29   30    1    2    3    4    
+ ● 19:00 -> 20:30 *                                                │  41   5••  6    7•   8    9   10   11    
+   Climbing (moved)  [personal]                                    │  42  12•• 13   14•  15   16   17   18    
+                                                                   │  43  19•• 20   21   22   23   24   25    
+                                                                   │  44  26•• 27   28   29•  30   31    1•   
+                                                                   │  45   2••  3    4    5    6    7    8•   
+                                                                   │ ── Week 44 ───────────────────────────── 
+                                                                   │ Sunday 1 Nov                             
+                                                                   │        Reading week                      
+                                                                   │ ── Week 45 ───────────────────────────── 
+                    ┌───────────────────────── Climbing (moved) ─────────────────────────┐                    
+                    │ Calendar  personal                                                 │, lecture           
                     │ Starts    Thu 29 Oct 2026 19:00                                    │                    
-                    │ Ends      Thu 29 Oct 2026 20:30                                    │ek                  
+                    │ Ends      Thu 29 Oct 2026 20:30                                    │                    
                     │ Repeats   yes (part of a series)                                   │────────────────────
-                    │                                                                    │odo                 
-                    │                                                                    │v                   
+                    │                                                                    │o                   
+                    │                                                                    │                    
                     └────────────────────────────────────────────────────────────────────┘                    
-                                                                       │                                      
-                                                                       │                                      
-                                                                       │                                      
-                                                                       │                                      
-                                                                       │                                      
-                                                                       │                                      
-                                                                       │                                      
-                                                                       │                                      
-                                                                       │                                      
-                                                                       │                                      
+                                                                   │                                          
+                                                                   │                                          
+                                                                   │                                          
+                                                                   │                                          
+                                                                   │                                          
+                                                                   │                                          
+                                                                   │                                          
+                                                                   │                                          
+                                                                   │                                          
+                                                                   │                                          
  Mon 16 Nov 2026 │ 11:32 │ ● personal ● University │ next: Lunch with Anna in 28m │ ⚠ 3 (W)                   
  Esc Close                                                                                                    

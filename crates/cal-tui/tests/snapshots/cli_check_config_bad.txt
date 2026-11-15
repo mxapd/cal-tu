@@ -1,3 +1,3 @@
 <config>: timezone: unknown time zone 'Mars/Olympus'
 <config>: calendars.uni.default_reminder: cannot parse 'soon' (use e.g. 15m, 1h, 1h30m, 1d)
-<config>: calendars.uni.color: unknown colour 'chartreuse-ish' (use a name like cyan or #rrggbb)
+<config>: calendars.uni.color: unknown colour 'chartreuse-ish' (use orange, teal, lavender, sage, sky, rose, sand, an ANSI name like cyan, or #rrggbb)

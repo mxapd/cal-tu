@@ -1,6 +1,6 @@
- Appointments · today                                                  │       ‹  Week 47 · Nov 2026  ›       
- Monday, November 16, 2026                                             │  Mon 16  ● ●                         
-                                                                       │                                      
+ Appointments · today                                              │         ‹  Week 47 · Nov 2026  ›         
+ Monday, November 16, 2026                                         │  Mon 16  ● ●                             
+                                                                   │                                          
  ○ 08:15 -> 10:00 ┌───────────────────────────────── Help ─────────────────────────────────┐                  
    Linear Algebra,│ h / l, ← / →      previous / next day                                  │                  
  ● 12:00 -> 13:00 │ H / L             previous / next week                                 │                  
@@ -15,7 +15,7 @@
                   │ d                 delete the selected item                             │                  
                   │ x, Space          todo: mark done / not done                           │                  
                   │ + / -             todo: raise / lower priority                         │──────────────────
-                  │ v                 switch month / week view                             │o                 
+                  │ v                 switch month / week view                             │                  
                   │ c                 show / hide calendars                                │                  
                   │ C                 show / hide completed todos                          │                  
                   │ S                 sync (runs sync_command), then reload                │                  
@@ -26,7 +26,7 @@
                   │                                                                        │                  
                   │ Markers           ● calendar item  ○ read-only  * repeats  > has notes │                  
                   └────────────────────────────────────────────────────────────────────────┘                  
-                                                                       │                                      
-                                                                       │                                      
+                                                                   │                                          
+                                                                   │                                          
  Mon 16 Nov 2026 │ 11:32 │ ● personal ● University │ next: Lunch with Anna in 28m │ ⚠ 3 (W)                   
  Esc Close                                                                                                    
