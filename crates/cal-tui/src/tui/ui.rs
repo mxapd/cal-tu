@@ -891,7 +891,7 @@ fn draw_todo(f: &mut Frame, app: &mut App, area: Rect) {
     let focused = app.focus == PanelKind::Todo;
     let mut lines = Vec::new();
     if app.todos.is_empty() {
-        lines.push(Line::from(" no todos").dark_gray());
+        lines.push(Line::from(" no todos").fg(Color::Indexed(245)));
     }
     for (idx, t) in app.todos.iter().enumerate() {
         let mut style = cal_style(app, t.calendar);
@@ -906,7 +906,7 @@ fn draw_todo(f: &mut Frame, app: &mut App, area: Rect) {
             t.priority.to_string()
         };
         let mut spans = vec![
-            Span::raw(format!(" {prio}. ")).dark_gray(),
+            Span::raw(format!(" {prio}. ")).fg(Color::Indexed(245)),
             Span::styled(t.summary.clone(), style),
         ];
         if let Some(due) = t.due {
@@ -916,7 +916,7 @@ fn draw_todo(f: &mut Frame, app: &mut App, area: Rect) {
             spans.push(if overdue {
                 label.red()
             } else {
-                label.dark_gray()
+                label.fg(Color::Indexed(245))
             });
         }
         let line = Line::from(spans);
@@ -1077,6 +1077,10 @@ fn popup_area(f: &Frame, width: u16, height: u16) -> Rect {
 /// Background of pop-ups: a card slightly lighter than the screen.
 const POPUP_BG: Color = Color::Indexed(235);
 
+/// Secondary text in pop-ups (labels, hints): light enough to read on the
+/// card background.
+const MUTED: Color = Color::Indexed(248);
+
 /// Accent bar at the top of a pop-up.
 const POPUP_BAR: Color = Color::Rgb(95, 135, 175);
 
@@ -1142,7 +1146,7 @@ fn draw_help(f: &mut Frame) {
 
 fn field(label: &str, value: String) -> Line<'static> {
     Line::from(vec![
-        Span::raw(format!(" {label:<10}")).dark_gray(),
+        Span::raw(format!(" {label:<10}")).fg(MUTED),
         Span::raw(value),
     ])
 }
@@ -1269,7 +1273,7 @@ fn draw_calendars(f: &mut Frame, app: &App, sel: usize) {
                 Span::styled(format!(" {check} "), style),
                 Span::styled("● ", dot_style),
                 Span::styled(cal.name.clone(), style),
-                Span::raw(if cal.read_only { "  read-only" } else { "" }).dark_gray(),
+                Span::raw(if cal.read_only { "  read-only" } else { "" }).fg(MUTED),
             ])
         })
         .collect();
@@ -1285,7 +1289,7 @@ fn draw_goto(f: &mut Frame, input: &str, error: Option<&str>) {
             Span::raw(input.to_string()).bold(),
             Span::raw("█"),
         ]),
-        Line::from(" 2026-12-24 · 12-24 · 24 · +7 · -7 · today").dark_gray(),
+        Line::from(" 2026-12-24 · 12-24 · 24 · +7 · -7 · today").fg(MUTED),
     ];
     if let Some(e) = error {
         lines.push(Line::from(format!(" {e}")).red());
@@ -1325,7 +1329,7 @@ fn draw_form(f: &mut Frame, app: &App, form: &Form) {
         let label = if focused {
             label.bold().cyan()
         } else {
-            label.dark_gray()
+            label.fg(MUTED)
         };
         let value = if field.id == FieldId::Calendar {
             match form.calendars.get(form.calendar) {
@@ -1340,18 +1344,20 @@ fn draw_form(f: &mut Frame, app: &App, form: &Form) {
                 let before: String = field.input.text.chars().take(field.input.cursor).collect();
                 cursor = Some((i, LABEL + 2 + before.chars().count()));
             }
-            let s = Span::raw(field.input.text.clone());
-            if focused {
-                s.bold()
+            if field.input.text.is_empty() {
+                // Example of what to type, until something is typed.
+                Span::raw(field.id.placeholder()).fg(MUTED).italic()
+            } else if focused {
+                Span::raw(field.input.text.clone()).bold()
             } else {
-                s
+                Span::raw(field.input.text.clone())
             }
         };
         lines.push(Line::from(vec![label, value]));
     }
     lines.push(Line::from(""));
     let hint = form.fields[form.focus].id.hint();
-    lines.push(Line::from(format!(" {hint}")).dark_gray());
+    lines.push(Line::from(format!(" {hint}")).fg(MUTED));
     if let Some(e) = &form.error {
         lines.push(Line::from(format!(" {e}")).red());
     }

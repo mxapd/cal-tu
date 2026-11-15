@@ -87,8 +87,8 @@ impl FieldId {
         match self {
             FieldId::Title => "Title",
             FieldId::Date => "Date",
-            FieldId::Start => "Start",
-            FieldId::End => "End",
+            FieldId::Start => "Start time",
+            FieldId::End => "End time",
             FieldId::Location => "Location",
             FieldId::Repeat => "Repeat",
             FieldId::Reminder => "Reminder",
@@ -99,11 +99,28 @@ impl FieldId {
         }
     }
 
+    /// Shown dimmed in an empty field.
+    pub fn placeholder(self) -> &'static str {
+        match self {
+            FieldId::Title => "what is it?",
+            FieldId::Date => "e.g. 2026-12-24, fri, tomorrow",
+            FieldId::Start => "e.g. 14:00 — empty = all day",
+            FieldId::End => "e.g. 15:30 or 1h30 — empty = 1 hour",
+            FieldId::Location => "optional",
+            FieldId::Reminder => "e.g. 15m — empty = no reminder",
+            FieldId::Due => "e.g. fri 17:00 — empty = no due date",
+            FieldId::Notes => "optional",
+            _ => "",
+        }
+    }
+
     pub fn hint(self) -> &'static str {
         match self {
-            FieldId::Date => "2026-12-24, 12-24, fri, tomorrow, +3d",
-            FieldId::Start => "14:00 or 2pm; empty = all day",
-            FieldId::End => "15:30, 1h30, 2026-12-25 10:00; all day: last day or 3d",
+            FieldId::Date => "The day: 2026-12-24, 12-24, fri, tomorrow, +3d",
+            FieldId::Start => {
+                "When it starts, e.g. 14:00 or 2pm. Leave empty for an all-day event."
+            }
+            FieldId::End => "Ends at 15:30, or lasts 1h30. Empty = 1 hour. All day: last day or 3d",
             FieldId::Repeat => "none, daily, weekdays, weekly, biweekly, monthly, yearly, FREQ=…",
             FieldId::Reminder => "15m, 1h, 1d; empty = none",
             FieldId::Due => "fri, 12-24 17:00, tomorrow 9am; empty = none",
@@ -410,20 +427,20 @@ impl Form {
                 date + Duration::days(1)
             } else if let Some(last) = parse_date(&end_s, date) {
                 if last < date {
-                    return Err("End: the last day is before the first".into());
+                    return Err("End time: the last day is before the first".into());
                 }
                 last + Duration::days(1)
             } else if let Some(len) = parse_length(&end_s) {
                 date + Duration::days(len.num_days().max(1))
             } else {
                 return Err(format!(
-                    "End: cannot understand '{end_s}' (a last day like 2026-12-24, or 3d)"
+                    "End time: cannot understand '{end_s}' (a last day like 2026-12-24, or 3d)"
                 ));
             };
             return Ok((Moment::Date(date), Moment::Date(end)));
         }
-        let t =
-            parse_time(&start_s).ok_or_else(|| format!("Start: cannot understand '{start_s}'"))?;
+        let t = parse_time(&start_s)
+            .ok_or_else(|| format!("Start time: cannot understand '{start_s}'"))?;
         let start = cal_core::time::local_to_zoned(home, date.and_time(t));
         let end = if end_s.is_empty() {
             start + Duration::hours(1)
@@ -447,13 +464,13 @@ impl Form {
                 (Some(d), Some(tm), None) => cal_core::time::local_to_zoned(home, d.and_time(tm)),
                 _ => {
                     return Err(format!(
-                        "End: cannot understand '{end_s}' (15:30, 1h30 or 2026-12-25 10:00)"
+                        "End time: cannot understand '{end_s}' (15:30, 1h30 or 2026-12-25 10:00)"
                     ))
                 }
             }
         };
         if end < start {
-            return Err("End: before the start".into());
+            return Err("End time: before the start".into());
         }
         Ok((Moment::DateTime(start), Moment::DateTime(end)))
     }

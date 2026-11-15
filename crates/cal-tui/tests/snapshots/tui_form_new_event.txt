@@ -10,15 +10,15 @@
  12:00│▌ Lunch with                               New event                                                   
       │▌ Café Lisa   Title      Dentist                                                    p                  
  13:00│              Date       2026-11-16                                                                    
-      │              Start      14:00                                                                         
- 14:00│              End        45m                                                                           
-      │              Location                                                                                 
+      │              Start time 14:00                                                                         
+ 14:00│              End time   45m                                                                           
+      │              Location   optional                                                                      
  15:00│              Repeat     none                                                                          
-      │              Reminder                                                              ───────────────────
- 16:00│              Notes                                                                                    
+      │              Reminder   e.g. 15m — empty = no reminder                             ───────────────────
+ 16:00│              Notes      optional                                                                      
       │              Calendar   ◀ personal ▶                                                                  
  17:00│                                                                                                       
-      │              15:30, 1h30, 2026-12-25 10:00; all day: last day or 3d                                   
+      │              Ends at 15:30, or lasts 1h30. Empty = 1 hour. All day: last day or 3d                    
  18:00│                                                                                                       
       │▌ Climbing  18:30–20:00                                     │                                          
  19:00│▌ ↻  personal                                               │                                          

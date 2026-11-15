@@ -12,10 +12,10 @@
  13:00│                                      Edit this occurrence                                             
       │              Title      Climbing with Sam                                                             
  14:00│              Date       2026-11-16                                                                    
-      │              Start      18:30                                                                         
- 15:00│              End        20:00                                                                         
-      │              Location                                                              ───────────────────
- 16:00│              Notes                                                                                    
+      │              Start time 18:30                                                                         
+ 15:00│              End time   20:00                                                                         
+      │              Location   optional                                                   ───────────────────
+ 16:00│              Notes      optional                                                                      
       │                                                                                                       
  17:00│                                                                                                       
       │                                                                                                       

@@ -328,7 +328,7 @@ mod tests {
         key(&mut app, KeyCode::Tab);
         typ(&mut app, "25:99");
         key(&mut app, KeyCode::Enter);
-        assert!(render(&mut app).contains("Start: cannot understand '25:99'"));
+        assert!(render(&mut app).contains("Start time: cannot understand '25:99'"));
         // Typing q in a form is text, not "close".
         press(&mut app, 'q');
         assert!(matches!(app.popup, Some(app::Popup::Form(_))));
@@ -938,6 +938,68 @@ mod tests {
         );
         // Key hints stay readable.
         assert_ne!(buf[(1, 31)].fg, Color::Indexed(240));
+    }
+
+    #[test]
+    fn popup_text_is_readable() {
+        use ratatui::style::Color;
+        // New event, help, go to date, calendars, details, delete question.
+        for keys in ["a", "?", "g", "c", "jj\n", "jd"] {
+            let mut app = app();
+            for k in keys.chars() {
+                if k == '\n' {
+                    key(&mut app, KeyCode::Enter);
+                } else {
+                    press(&mut app, k);
+                }
+            }
+            assert!(app.popup.is_some(), "{keys:?} opens a pop-up");
+            let mut term = Terminal::new(TestBackend::new(110, 32)).unwrap();
+            term.draw(|f| ui::draw(f, &mut app)).unwrap();
+            let card = *app
+                .hits
+                .iter()
+                .find(|(_, h)| *h == app::Hit::Popup)
+                .map(|(r, _)| r)
+                .unwrap();
+            let buf = term.backend().buffer();
+            // Every visible character on the card uses a light enough colour:
+            // never the terminal's dark grey or near-background greys.
+            for y in card.top() + 1..card.bottom() {
+                for x in card.left()..card.right() {
+                    let c = &buf[(x, y)];
+                    if c.symbol().trim().is_empty() {
+                        continue;
+                    }
+                    let dark = match c.fg {
+                        Color::DarkGray | Color::Black => true,
+                        Color::Indexed(n) => (232..=243).contains(&n),
+                        _ => false,
+                    };
+                    assert!(
+                        !dark,
+                        "{keys:?}: {:?} at {x},{y} has fg {:?}",
+                        c.symbol(),
+                        c.fg
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn form_hints_and_placeholders_fit_the_card() {
+        use form::FieldId::*;
+        // Card is 72 wide: 1 cell padding each side, 1 leading space.
+        for id in [
+            Title, Date, Start, End, Location, Repeat, Reminder, Due, Priority, Notes, Calendar,
+        ] {
+            assert!(id.hint().chars().count() <= 68, "hint for {id:?} too long");
+            assert!(
+                11 + id.placeholder().chars().count() <= 68,
+                "placeholder for {id:?} too long"
+            );
+        }
     }
 
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`
