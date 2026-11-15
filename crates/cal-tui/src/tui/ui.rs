@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-use super::app::{App, CalView, Pending, Popup};
+use super::app::{App, CalView, Hit, Pending, Popup};
 use super::form::{FieldId, Form};
 use super::layout::PanelKind;
 use crate::fmt::{humanize, parse_color, time_range, Rgb, TimeRange};
@@ -26,9 +26,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     super::layout::resolve(&layout, main, &mut panels);
     app.main_area = main;
     app.shown_panels = panels.iter().map(|(k, _)| *k).collect();
+    app.hits.clear();
     let mut dividers = Dividers::new();
     for (kind, area) in panels {
         let area = take_dividers(area, main, &mut dividers);
+        app.hits.push((area, Hit::Panel(kind)));
         match kind {
             PanelKind::Appointments => draw_appointments(f, app, area),
             PanelKind::Calendar => draw_calendar(f, app, area),
@@ -49,6 +51,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Some(Popup::Scope(p)) => draw_scope(f, app, &p),
         Some(Popup::Confirm(p)) => draw_confirm(f, &p),
         None => {}
+    }
+    if let Some(area) = LAST_POPUP.take().filter(|_| app.popup.is_some()) {
+        app.hits.push((area, Hit::Popup));
+        if matches!(app.popup, Some(Popup::Calendars { .. })) {
+            for i in 0..app.store.calendars.len() as u16 {
+                let row = Rect::new(area.x + 1, area.y + 1 + i, area.width.saturating_sub(2), 1);
+                app.hits.push((row, Hit::CalendarToggle(i as usize)));
+            }
+        }
     }
 }
 
@@ -180,16 +191,24 @@ fn highlight_row(line: Line<'static>, width: u16, focused: bool) -> Line<'static
 }
 
 /// Render `lines` into the block, scrolled so that rows `sel` are visible.
+/// Scroll so the selected rows are visible; returns the lines and how many
+/// were scrolled off the top.
 fn scrolled(
     lines: Vec<Line<'static>>,
     sel: Option<(usize, usize)>,
     height: usize,
-) -> Vec<Line<'static>> {
+) -> (Vec<Line<'static>>, usize) {
     let offset = match sel {
         Some((first, last)) if last >= height => (last + 1).saturating_sub(height).min(first),
         _ => 0,
     };
-    lines.into_iter().skip(offset).collect()
+    (lines.into_iter().skip(offset).collect(), offset)
+}
+
+/// Screen row of line `row` after scrolling by `offset`, if visible.
+fn screen_row(inner: Rect, row: usize, offset: usize) -> Option<u16> {
+    let r = row.checked_sub(offset)?;
+    (r < inner.height as usize).then(|| inner.y + r as u16)
 }
 
 fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
@@ -207,6 +226,7 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
         Line::from(""),
     ];
     let mut sel_rows = None;
+    let mut item_rows = Vec::new();
 
     if app.day_items.is_empty() {
         lines.push(Line::from("  nothing scheduled").dark_gray());
@@ -267,6 +287,7 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
         if selected {
             sel_rows = Some((start_row, lines.len() - 1));
         }
+        item_rows.push((start_row, lines.len() - 1));
     }
 
     if let Some((a, b)) = sel_rows {
@@ -274,7 +295,15 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
             *line = highlight_row(std::mem::take(line), inner.width, focused);
         }
     }
-    let lines = scrolled(lines, sel_rows, inner.height as usize);
+    let (lines, offset) = scrolled(lines, sel_rows, inner.height as usize);
+    for (i, (a, b)) in item_rows.into_iter().enumerate() {
+        for row in a..=b {
+            if let Some(y) = screen_row(inner, row, offset) {
+                app.hits
+                    .push((Rect::new(inner.x, y, inner.width, 1), Hit::Appointment(i)));
+            }
+        }
+    }
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -309,6 +338,11 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
         s
     };
 
+    let mut hits: Vec<(Rect, Hit)> = Vec::new();
+    let row_rect = |idx: usize| {
+        (idx < inner.height as usize)
+            .then(|| Rect::new(inner.x, inner.y + idx as u16, inner.width, 1))
+    };
     let lines: Vec<Line> = match app.cal_view {
         CalView::Month => {
             let (start, _) = app.visible_range();
@@ -367,7 +401,16 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                     Span::raw(pad.clone()),
                     Span::styled(format!("{:>2} ", monday.iso_week().week()), label),
                 ];
+                let y = 1 + week as usize;
                 for wd in 0..7 {
+                    if let Some(r) = row_rect(y) {
+                        let x = inner.x + (pad.len() + 3 + wd as usize * cw) as u16;
+                        let w = (cw as u16).min(inner.right().saturating_sub(x));
+                        hits.push((
+                            Rect::new(x, r.y, w, 1),
+                            Hit::Day(monday + Duration::days(wd)),
+                        ));
+                    }
                     spans.extend(day_cell(monday + Duration::days(wd)));
                 }
                 lines.push(Line::from(spans));
@@ -399,6 +442,9 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                         Span::raw(" ".repeat(9))
                     };
                     last_day = Some(day);
+                    if let Some(r) = row_rect(lines.len()) {
+                        hits.push((r, Hit::AgendaDay(day)));
+                    }
                     let when = if i.kind == Kind::Todo {
                         "due".to_string()
                     } else if i.all_day {
@@ -433,11 +479,15 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
                 for cal in app.marks.get(&d).into_iter().flatten().take(6) {
                     spans.push(Span::styled("● ", cal_style(app, *cal)));
                 }
+                if let Some(r) = row_rect(lines.len()) {
+                    hits.push((r, Hit::Day(d)));
+                }
                 lines.push(Line::from(spans));
             }
             lines
         }
     };
+    app.hits.extend(hits);
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -487,11 +537,20 @@ fn draw_todo(f: &mut Frame, app: &mut App, area: Rect) {
             line
         });
     }
-    let lines = scrolled(
+    let n = lines.len();
+    let (lines, offset) = scrolled(
         lines,
         Some((app.todo_sel, app.todo_sel)),
         inner.height as usize,
     );
+    if !app.todos.is_empty() {
+        for i in 0..n {
+            if let Some(y) = screen_row(inner, i, offset) {
+                app.hits
+                    .push((Rect::new(inner.x, y, inner.width, 1), Hit::Todo(i)));
+            }
+        }
+    }
     f.render_widget(Paragraph::new(lines), inner);
 }
 
@@ -615,11 +674,18 @@ fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
+thread_local! {
+    /// Area of the pop-up drawn in this frame, for mouse clicks.
+    static LAST_POPUP: std::cell::Cell<Option<Rect>> = const { std::cell::Cell::new(None) };
+}
+
 fn popup_area(f: &Frame, width: u16, height: u16) -> Rect {
     let a = f.area();
     let w = width.min(a.width.saturating_sub(2));
     let h = height.min(a.height.saturating_sub(2));
-    Rect::new(a.x + (a.width - w) / 2, a.y + (a.height - h) / 2, w, h)
+    let r = Rect::new(a.x + (a.width - w) / 2, a.y + (a.height - h) / 2, w, h);
+    LAST_POPUP.set(Some(r));
+    r
 }
 
 fn popup_block(title: &str) -> Block<'_> {

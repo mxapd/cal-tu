@@ -4,14 +4,16 @@ use cal_core::store::Fingerprint;
 use cal_core::{Config, EditError, Instance, Kind, Scope, Store, Todo, Warning};
 use chrono::{DateTime, Datelike, Duration, Months, NaiveDate, Utc};
 use chrono_tz::Tz;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{
+    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use super::form::{Form, Submit};
 use super::layout::{Node, PanelKind};
 use cal_core::layout::{LayoutConfig, BUILTIN};
-use ratatui::layout::Rect;
+use ratatui::layout::{Position, Rect};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CalView {
@@ -50,6 +52,34 @@ pub enum Popup {
     Confirm(Pending),
 }
 
+/// What a mouse click at some screen position refers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hit {
+    Panel(PanelKind),
+    /// A day in the month or week grid.
+    Day(NaiveDate),
+    /// A line of the agenda under the month grid.
+    AgendaDay(NaiveDate),
+    Appointment(usize),
+    Todo(usize),
+    /// Inside the open pop-up.
+    Popup,
+    /// A row of the calendars pop-up.
+    CalendarToggle(usize),
+}
+
+impl Hit {
+    fn panel(self) -> Option<PanelKind> {
+        match self {
+            Hit::Panel(p) => Some(p),
+            Hit::Day(_) | Hit::AgendaDay(_) => Some(PanelKind::Calendar),
+            Hit::Appointment(_) => Some(PanelKind::Appointments),
+            Hit::Todo(_) => Some(PanelKind::Todo),
+            Hit::Popup | Hit::CalendarToggle(_) => None,
+        }
+    }
+}
+
 /// What the run loop has to do after a key press.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
@@ -85,6 +115,8 @@ pub struct App {
     /// Set while drawing: the main area and the panels shown in it.
     pub main_area: Rect,
     pub shown_panels: Vec<PanelKind>,
+    /// Clickable regions of the last drawn frame (later entries win).
+    pub hits: Vec<(Rect, Hit)>,
     /// Fixed "now" for tests.
     pub now_override: Option<DateTime<Tz>>,
 
@@ -140,6 +172,7 @@ impl App {
             layout_state_path: state_path,
             main_area: Rect::default(),
             shown_panels: Vec::new(),
+            hits: Vec::new(),
             now_override: None,
             day_items: Vec::new(),
             upcoming: Vec::new(),
@@ -613,6 +646,120 @@ impl App {
         }
     }
 
+    // --- mouse -------------------------------------------------------------------
+
+    fn toggle_calendar(&mut self, i: usize) {
+        if let Some(cal) = self.store.calendars.get(i) {
+            let id = cal.id.clone();
+            if !self.toggled_off.remove(&id) {
+                self.toggled_off.insert(id);
+            }
+            self.apply_visibility();
+            self.refresh();
+        }
+    }
+
+    fn hit_at(&self, x: u16, y: u16) -> Option<Hit> {
+        let pos = Position { x, y };
+        self.hits
+            .iter()
+            .rev()
+            .find(|(r, _)| r.contains(pos))
+            .map(|(_, h)| *h)
+    }
+
+    pub fn handle_mouse(&mut self, m: MouseEvent) -> Action {
+        let hit = self.hit_at(m.column, m.row);
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => self.click(hit),
+            MouseEventKind::ScrollUp => self.scroll(hit, -1),
+            MouseEventKind::ScrollDown => self.scroll(hit, 1),
+            _ => {}
+        }
+        Action::None
+    }
+
+    fn click(&mut self, hit: Option<Hit>) {
+        self.message = None;
+        if let Some(popup) = &self.popup {
+            match hit {
+                Some(Hit::CalendarToggle(i)) => {
+                    self.toggle_calendar(i);
+                    self.popup = Some(Popup::Calendars { sel: i });
+                }
+                Some(Hit::Popup) => {}
+                // A click outside closes simple pop-ups, like Esc. Forms and
+                // questions need an explicit answer.
+                _ if !matches!(popup, Popup::Form(_) | Popup::Scope(_) | Popup::Confirm(_)) => {
+                    self.handle_popup_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+                }
+                _ => {}
+            }
+            return;
+        }
+        let Some(hit) = hit else { return };
+        if self.layout_mode {
+            // In layout mode a click only picks the panel to arrange.
+            if let Some(p) = hit.panel() {
+                self.focus = p;
+            }
+            return;
+        }
+        match hit {
+            Hit::Day(d) => {
+                self.focus = PanelKind::Calendar;
+                self.set_date(d);
+            }
+            Hit::AgendaDay(d) => {
+                self.set_date(d);
+                self.focus = PanelKind::Appointments;
+            }
+            Hit::Appointment(i) => {
+                if self.focus == PanelKind::Appointments && self.appt_sel == i {
+                    self.popup = Some(Popup::Details);
+                } else {
+                    self.focus = PanelKind::Appointments;
+                    self.appt_sel = i;
+                }
+            }
+            Hit::Todo(i) => {
+                if self.focus == PanelKind::Todo && self.todo_sel == i {
+                    self.popup = Some(Popup::Details);
+                } else {
+                    self.focus = PanelKind::Todo;
+                    self.todo_sel = i;
+                }
+            }
+            Hit::Panel(p) => self.focus = p,
+            Hit::Popup | Hit::CalendarToggle(_) => {}
+        }
+    }
+
+    fn scroll(&mut self, hit: Option<Hit>, dir: i32) {
+        if let Some(Popup::Warnings { scroll }) = self.popup {
+            self.popup = Some(Popup::Warnings {
+                scroll: (scroll as i32 + dir).max(0) as usize,
+            });
+            return;
+        }
+        if self.popup.is_some() {
+            return;
+        }
+        match hit.and_then(Hit::panel) {
+            Some(PanelKind::Calendar) => match self.cal_view {
+                CalView::Month => self.shift_months(dir),
+                CalView::Week => self.shift_days(7 * dir as i64),
+            },
+            Some(PanelKind::Appointments) => {
+                self.appt_sel = step(self.appt_sel, dir, self.day_items.len());
+            }
+            Some(PanelKind::Todo) => {
+                self.todo_sel = step(self.todo_sel, dir, self.todos.len());
+            }
+            None => {}
+        }
+    }
+
     // --- layouts ---------------------------------------------------------------
 
     /// Preset names in cycling order: built-in, then saved, then config.
@@ -869,14 +1016,7 @@ impl App {
                         sel: step(sel, -1, n),
                     },
                     KeyCode::Char(' ') | KeyCode::Enter => {
-                        if let Some(cal) = self.store.calendars.get(sel) {
-                            let id = cal.id.clone();
-                            if !self.toggled_off.remove(&id) {
-                                self.toggled_off.insert(id);
-                            }
-                            self.apply_visibility();
-                            self.refresh();
-                        }
+                        self.toggle_calendar(sel);
                         Popup::Calendars { sel }
                     }
                     _ => popup,

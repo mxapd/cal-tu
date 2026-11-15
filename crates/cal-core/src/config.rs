@@ -18,6 +18,9 @@ pub struct Config {
     pub sync_command: Option<String>,
     /// IANA zone for display and floating times; defaults to the system zone.
     pub timezone: Option<String>,
+    /// Mouse support in the TUI (default on). While on, select text in the
+    /// terminal with Shift+drag.
+    pub mouse: Option<bool>,
     /// Per-calendar settings, keyed by folder name.
     #[serde(default)]
     pub calendars: BTreeMap<String, CalendarConfig>,

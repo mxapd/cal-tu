@@ -14,7 +14,10 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use cal_core::{Config, Store};
 use chrono::Timelike;
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind,
+};
+use ratatui::crossterm::execute;
 use ratatui::DefaultTerminal;
 
 use app::{Action, App};
@@ -30,10 +33,35 @@ pub fn run(config: Config, now: Option<chrono::DateTime<chrono_tz::Tz>>) -> Resu
         app.date = now.date_naive();
         app.refresh();
     }
-    let mut terminal = ratatui::init();
+    let mouse = app.config.mouse.unwrap_or(true);
+    if mouse {
+        // Stop mouse reporting if we crash, or the shell gets mouse codes.
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let _ = execute!(std::io::stdout(), DisableMouseCapture);
+            previous(info);
+        }));
+    }
+    let mut terminal = enter(mouse);
     let result = event_loop(&mut terminal, &mut app);
-    ratatui::restore();
+    leave(mouse);
     result
+}
+
+/// Start full-screen mode (and mouse reporting).
+fn enter(mouse: bool) -> DefaultTerminal {
+    let terminal = ratatui::init();
+    if mouse {
+        let _ = execute!(std::io::stdout(), EnableMouseCapture);
+    }
+    terminal
+}
+
+fn leave(mouse: bool) {
+    if mouse {
+        let _ = execute!(std::io::stdout(), DisableMouseCapture);
+    }
+    ratatui::restore();
 }
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
@@ -43,14 +71,15 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
         terminal.draw(|f| ui::draw(f, app))?;
 
         if event::poll(Duration::from_millis(500))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match app.handle_key(key) {
-                        Action::Quit => return Ok(()),
-                        Action::Sync => run_sync(terminal, app)?,
-                        Action::None => {}
-                    }
-                }
+            let action = match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => app.handle_key(key),
+                Event::Mouse(m) => app.handle_mouse(m),
+                _ => Action::None,
+            };
+            match action {
+                Action::Quit => return Ok(()),
+                Action::Sync => run_sync(terminal, app)?,
+                Action::None => {}
             }
         }
 
@@ -72,7 +101,8 @@ fn run_sync(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
         app.message = Some("No sync_command set in the config".into());
         return Ok(());
     };
-    ratatui::restore();
+    let mouse = app.config.mouse.unwrap_or(true);
+    leave(mouse);
     println!("Running: {cmd}\n");
     let status = std::process::Command::new("sh")
         .arg("-c")
@@ -88,7 +118,7 @@ fn run_sync(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
         let mut line = String::new();
         let _ = std::io::stdin().read_line(&mut line);
     }
-    *terminal = ratatui::init();
+    *terminal = enter(mouse);
     app.reload();
     app.message = Some(if ok {
         "Sync finished".into()
@@ -104,7 +134,9 @@ mod tests {
     use chrono::{NaiveDate, TimeZone};
     use chrono_tz::Europe::Stockholm;
     use ratatui::backend::TestBackend;
-    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::crossterm::event::{
+        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
     use ratatui::Terminal;
     use std::path::Path;
 
@@ -501,6 +533,137 @@ mod tests {
         // 110 columns is "narrow" here, so three-columns is used.
         let screen = render(&mut app);
         assert_eq!(app.shown_panels[0], layout::PanelKind::Calendar, "{screen}");
+    }
+
+    fn mouse(app: &mut App, kind: MouseEventKind, x: u16, y: u16) {
+        app.handle_mouse(MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    /// Click the middle of the region registered for `hit`.
+    fn click_on(app: &mut App, hit: app::Hit) -> ratatui::layout::Rect {
+        let (r, _) = *app
+            .hits
+            .iter()
+            .rev()
+            .find(|(_, h)| *h == hit)
+            .unwrap_or_else(|| panic!("{hit:?} not on screen"));
+        mouse(
+            app,
+            MouseEventKind::Down(MouseButton::Left),
+            r.x + r.width / 2,
+            r.y,
+        );
+        r
+    }
+
+    fn day(m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, m, d).unwrap()
+    }
+
+    #[test]
+    fn click_days_in_the_month_grid() {
+        let mut app = app();
+        let screen = render(&mut app);
+        let rows: Vec<&str> = screen.lines().collect();
+        // Every day's click region covers its number on screen.
+        for (r, h) in app.hits.clone() {
+            if let app::Hit::Day(d) = h {
+                let row: String = rows[r.y as usize]
+                    .chars()
+                    .skip(r.x as usize)
+                    .take(r.width as usize)
+                    .collect();
+                assert_eq!(row.trim(), d.format("%-d").to_string(), "{d}");
+            }
+        }
+        click_on(&mut app, app::Hit::Day(day(11, 20)));
+        assert_eq!(
+            (app.date, app.focus),
+            (day(11, 20), layout::PanelKind::Calendar)
+        );
+        // A dimmed day of the next month switches month.
+        render(&mut app);
+        click_on(&mut app, app::Hit::Day(day(12, 3)));
+        assert_eq!(app.date, day(12, 3));
+        assert!(render(&mut app).contains("December 2026"));
+    }
+
+    #[test]
+    fn click_agenda_line_goes_to_that_day() {
+        let mut app = app();
+        render(&mut app);
+        click_on(&mut app, app::Hit::AgendaDay(day(11, 20)));
+        assert_eq!(
+            (app.date, app.focus),
+            (day(11, 20), layout::PanelKind::Appointments)
+        );
+        assert!(render(&mut app).contains("Friday, November 20, 2026"));
+    }
+
+    #[test]
+    fn click_items_select_then_open() {
+        let mut app = app();
+        render(&mut app);
+        click_on(&mut app, app::Hit::Appointment(2));
+        assert_eq!(app.appt_sel, 2);
+        assert!(app.popup.is_none());
+        render(&mut app);
+        click_on(&mut app, app::Hit::Appointment(2));
+        assert!(matches!(app.popup, Some(app::Popup::Details)));
+        // A click outside the details pop-up closes it.
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), 0, 0);
+        assert!(app.popup.is_none());
+
+        render(&mut app);
+        click_on(&mut app, app::Hit::Todo(1));
+        assert_eq!((app.focus, app.todo_sel), (layout::PanelKind::Todo, 1));
+    }
+
+    #[test]
+    fn scroll_wheel() {
+        let mut app = app();
+        render(&mut app);
+        let (cal, _) = *app
+            .hits
+            .iter()
+            .find(|(_, h)| *h == app::Hit::Panel(layout::PanelKind::Calendar))
+            .unwrap();
+        mouse(&mut app, MouseEventKind::ScrollDown, cal.x + 2, cal.y + 2);
+        assert_eq!(app.date, day(12, 16));
+        mouse(&mut app, MouseEventKind::ScrollUp, cal.x + 2, cal.y + 2);
+        assert_eq!(app.date, day(11, 16));
+        let (appts, _) = app.hits[0];
+        mouse(
+            &mut app,
+            MouseEventKind::ScrollDown,
+            appts.x + 2,
+            appts.y + 3,
+        );
+        assert_eq!(app.appt_sel, 1);
+    }
+
+    #[test]
+    fn click_in_popups() {
+        let mut app = app();
+        press(&mut app, 'c');
+        render(&mut app);
+        click_on(&mut app, app::Hit::CalendarToggle(1)); // University
+        assert!(app.store.calendars[1].hidden);
+        assert!(matches!(app.popup, Some(app::Popup::Calendars { .. })));
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), 0, 0);
+        assert!(app.popup.is_none());
+        assert!(!render(&mut app).contains("Linear Algebra"));
+
+        // Forms are not closed by a stray click.
+        press(&mut app, 'a');
+        render(&mut app);
+        mouse(&mut app, MouseEventKind::Down(MouseButton::Left), 0, 0);
+        assert!(matches!(app.popup, Some(app::Popup::Form(_))));
     }
 
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`

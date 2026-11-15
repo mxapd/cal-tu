@@ -26,6 +26,11 @@ cal-tui todo add Pay rent --due fri -p 1   # add a todo
 cal-tui todo done rent                     # complete it (by part of the title)
 ```
 
+The mouse works too: click a day (or a line of the agenda under the month) to go
+there, click an item to select it and again to open it, scroll over the
+calendar to change month. Set `mouse = false` in the config to turn this off;
+while it is on, hold Shift to select text in the terminal.
+
 In the TUI: `a` add, `e` edit, `d` delete. For a repeating event you choose
 "only this occurrence" or "all occurrences". In the todo panel `x` marks done
 and `+`/`-` change the priority. Press `?` for all keys.
