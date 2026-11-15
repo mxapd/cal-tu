@@ -694,6 +694,92 @@ mod tests {
         assert_eq!(app.date, day(12, 23));
     }
 
+    #[test]
+    fn drag_divider_resizes_and_saves() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("layout.toml");
+        let mut app = app_with(FIXTURES, "", &state);
+        render(&mut app);
+        let hit = app::Hit::Divider(layout::PanelKind::Calendar, layout::Dir::Rows);
+        let (r, _) = *app.hits.iter().rev().find(|(_, h)| *h == hit).unwrap();
+        let cal_before = app
+            .hits
+            .iter()
+            .find(|(_, h)| *h == app::Hit::Panel(layout::PanelKind::Calendar))
+            .unwrap()
+            .0
+            .height;
+        // Drag the calendar/todo divider 5 rows down and let go.
+        mouse(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            r.x + 5,
+            r.y,
+        );
+        mouse(
+            &mut app,
+            MouseEventKind::Drag(MouseButton::Left),
+            r.x + 5,
+            r.y + 3,
+        );
+        mouse(
+            &mut app,
+            MouseEventKind::Drag(MouseButton::Left),
+            r.x + 5,
+            r.y + 5,
+        );
+        mouse(
+            &mut app,
+            MouseEventKind::Up(MouseButton::Left),
+            r.x + 5,
+            r.y + 5,
+        );
+        let screen = render(&mut app);
+        let cal_after = app
+            .hits
+            .iter()
+            .find(|(_, h)| *h == app::Hit::Panel(layout::PanelKind::Calendar))
+            .unwrap()
+            .0
+            .height;
+        assert_eq!(cal_after, cal_before + 5, "{screen}");
+        assert!(screen.contains("Saved layout 'custom'"), "{screen}");
+        // Kept next time.
+        let mut again = app_with(FIXTURES, "", &state);
+        render(&mut again);
+        assert_eq!(again.layout, app.layout);
+
+        // The vertical divider next to appointments works too.
+        let hit = app::Hit::Divider(layout::PanelKind::Appointments, layout::Dir::Columns);
+        let (r, _) = *app.hits.iter().rev().find(|(_, h)| *h == hit).unwrap();
+        mouse(
+            &mut app,
+            MouseEventKind::Down(MouseButton::Left),
+            r.x,
+            r.y + 3,
+        );
+        mouse(
+            &mut app,
+            MouseEventKind::Drag(MouseButton::Left),
+            r.x - 10,
+            r.y + 3,
+        );
+        mouse(
+            &mut app,
+            MouseEventKind::Up(MouseButton::Left),
+            r.x - 10,
+            r.y + 3,
+        );
+        render(&mut app);
+        let appts = app
+            .hits
+            .iter()
+            .find(|(_, h)| *h == app::Hit::Panel(layout::PanelKind::Appointments))
+            .unwrap()
+            .0;
+        assert_eq!(appts.right(), r.x - 10, "divider follows the mouse");
+    }
+
     /// `cargo test -p cal-tui print_screen -- --ignored --nocapture`
     #[test]
     #[ignore]

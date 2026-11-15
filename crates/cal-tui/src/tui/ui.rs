@@ -2,7 +2,7 @@
 
 use cal_core::{Kind, Moment};
 use chrono::{Datelike, Duration, NaiveDate};
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
@@ -10,16 +10,33 @@ use ratatui::Frame;
 
 use super::app::{App, CalView, Hit, Pending, Popup};
 use super::form::{FieldId, Form};
-use super::layout::PanelKind;
+use super::layout::{Dir, PanelKind};
 use crate::fmt::{humanize, parse_color, time_range, Rgb, TimeRange};
 
+/// Colour of the outline around the whole program.
+const FRAME: Color = Color::Black;
+
 pub fn draw(f: &mut Frame, app: &mut App) {
+    // A square outline around everything (too small a terminal: no outline).
+    let outer = f.area();
+    let framed = outer.width >= 20 && outer.height >= 8;
+    let content = if framed {
+        f.render_widget(
+            Block::bordered()
+                .border_type(BorderType::Plain)
+                .border_style(Style::new().fg(FRAME)),
+            outer,
+        );
+        outer.inner(Margin::new(1, 1))
+    } else {
+        outer
+    };
     let [main, status, keys] = Layout::vertical([
         Constraint::Fill(1),
         Constraint::Length(1),
         Constraint::Length(1),
     ])
-    .areas(f.area());
+    .areas(content);
 
     let layout = app.displayed_layout(main.width);
     let mut panels = Vec::new();
@@ -29,8 +46,18 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.hits.clear();
     let mut dividers = Dividers::new();
     for (kind, area) in panels {
-        let area = take_dividers(area, main, &mut dividers);
-        app.hits.push((area, Hit::Panel(kind)));
+        let inner = take_dividers(area, main, &mut dividers);
+        app.hits.push((inner, Hit::Panel(kind)));
+        // Dividers can be dragged with the mouse.
+        if inner.width < area.width {
+            let r = Rect::new(area.right() - 1, area.y, 1, area.height);
+            app.hits.push((r, Hit::Divider(kind, Dir::Columns)));
+        }
+        if inner.height < area.height {
+            let r = Rect::new(area.x, area.bottom() - 1, area.width, 1);
+            app.hits.push((r, Hit::Divider(kind, Dir::Rows)));
+        }
+        let area = inner;
         match kind {
             PanelKind::Appointments => draw_appointments(f, app, area),
             PanelKind::Calendar => draw_calendar(f, app, area),
@@ -38,6 +65,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
     }
     draw_dividers(f, &dividers);
+    if framed {
+        join_frame(f, &dividers, main, outer);
+    }
     draw_status(f, app, status);
     draw_keys(f, app, keys);
 
@@ -99,6 +129,28 @@ fn take_dividers(area: Rect, main: Rect, dividers: &mut Dividers) -> Rect {
         inner.height -= 1;
     }
     inner
+}
+
+/// Where a divider meets the outline, draw a T-junction in the outline.
+fn join_frame(f: &mut Frame, dividers: &Dividers, main: Rect, outer: Rect) {
+    let style = Style::new().fg(FRAME);
+    let buf = f.buffer_mut();
+    let mut set = |x: u16, y: u16, s: &str| {
+        if let Some(cell) = buf.cell_mut((x, y)) {
+            cell.set_symbol(s).set_style(style);
+        }
+    };
+    for &(x, y) in dividers {
+        if y == main.y && !dividers.contains(&(x.wrapping_sub(1), y)) {
+            set(x, outer.y, "┬");
+        }
+        if x == main.x {
+            set(outer.x, y, "├");
+        }
+        if x == main.right() - 1 {
+            set(outer.right() - 1, y, "┤");
+        }
+    }
 }
 
 /// Draw dividers, joining lines where they meet (├ ┤ ┬ ┴ ┼ and corners).
@@ -217,7 +269,7 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         "Appointments".to_string()
     };
-    let inner = panel_frame(f, app, PanelKind::Appointments, &title, area, true);
+    let inner = panel_frame(f, app, PanelKind::Appointments, &title, area, false);
 
     let focused = app.focus == PanelKind::Appointments;
     let home = app.store.home;

@@ -149,6 +149,47 @@ pub fn resize(root: &mut Node, panel: PanelKind, along: bool, delta: i32, area: 
     true
 }
 
+/// Move the divider after `panel` (below it for `Dir::Rows`, to its right for
+/// `Dir::Columns`) to screen coordinate `pos`. The divider belongs to the
+/// nearest split in that direction where the panel (or the group holding it)
+/// is not the last child; that child gets a fixed size in cells.
+pub fn drag_divider(root: &mut Node, panel: PanelKind, dir: Dir, pos: u16, area: Rect) -> bool {
+    let Some(mut path) = path_to(root, panel) else {
+        return false;
+    };
+    while let Some((&i, parent)) = path.split_last() {
+        if let Node::Split(d, _, siblings) = node_at(root, parent) {
+            if *d == dir && i + 1 < siblings.len() {
+                let own = rect_at(root, area, &path);
+                let whole = rect_at(root, area, parent);
+                let (start, total) = match dir {
+                    Dir::Rows => (own.y, whole.height),
+                    Dir::Columns => (own.x, whole.width),
+                };
+                // Keep at least 3 cells on either side.
+                let size = (pos + 1)
+                    .saturating_sub(start)
+                    .clamp(3, total.saturating_sub(3).max(3));
+                let parent = parent.to_vec();
+                if let Node::Split(_, _, children) = node_at_mut(root, &parent) {
+                    children[i].set_size(Size::Cells(size));
+                    // Someone has to take the remaining space.
+                    if !children
+                        .iter()
+                        .enumerate()
+                        .any(|(j, c)| j != i && c.size() == Size::Fill)
+                    {
+                        children[i + 1].set_size(Size::Fill);
+                    }
+                }
+                return true;
+            }
+        }
+        path.pop();
+    }
+    false
+}
+
 /// Move the focused panel one place forward in its split (wrapping).
 pub fn swap(root: &mut Node, panel: PanelKind) -> bool {
     let Some(path) = path_to(root, panel) else {

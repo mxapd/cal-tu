@@ -28,7 +28,8 @@ cal-tui todo done rent                     # complete it (by part of the title)
 
 The mouse works too: click a day (or a line of the agenda under the month) to go
 there, click an item to select it and again to open it, scroll over the
-calendar to change month. Set `mouse = false` in the config to turn this off;
+calendar to change month or use the ‹ › arrows by its title, and drag the lines
+between panels to resize them (saved when you let go). Set `mouse = false` in the config to turn this off;
 while it is on, hold Shift to select text in the terminal.
 
 In the TUI: `a` add, `e` edit, `d` delete. For a repeating event you choose

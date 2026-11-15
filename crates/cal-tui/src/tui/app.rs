@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use super::form::{Form, Submit};
-use super::layout::{Node, PanelKind};
+use super::layout::{Dir, Node, PanelKind};
 use cal_core::layout::{LayoutConfig, BUILTIN};
 use ratatui::layout::{Position, Rect};
 
@@ -62,6 +62,8 @@ pub enum Hit {
     AgendaDay(NaiveDate),
     Appointment(usize),
     Todo(usize),
+    /// The divider below (`Dir::Rows`) or right of (`Dir::Columns`) a panel.
+    Divider(PanelKind, Dir),
     /// Inside the open pop-up.
     Popup,
     /// The ‹ and › next to the calendar title (previous / next month or week).
@@ -78,6 +80,7 @@ impl Hit {
             Hit::Day(_) | Hit::AgendaDay(_) | Hit::Prev | Hit::Next => Some(PanelKind::Calendar),
             Hit::Appointment(_) => Some(PanelKind::Appointments),
             Hit::Todo(_) => Some(PanelKind::Todo),
+            Hit::Divider(p, _) => Some(p),
             Hit::Popup | Hit::CalendarToggle(_) => None,
         }
     }
@@ -120,6 +123,8 @@ pub struct App {
     pub shown_panels: Vec<PanelKind>,
     /// Clickable regions of the last drawn frame (later entries win).
     pub hits: Vec<(Rect, Hit)>,
+    /// Divider being dragged with the mouse.
+    dragging: Option<(PanelKind, Dir)>,
     /// Fixed "now" for tests.
     pub now_override: Option<DateTime<Tz>>,
 
@@ -176,6 +181,7 @@ impl App {
             main_area: Rect::default(),
             shown_panels: Vec::new(),
             hits: Vec::new(),
+            dragging: None,
             now_override: None,
             day_items: Vec::new(),
             upcoming: Vec::new(),
@@ -662,6 +668,37 @@ impl App {
         }
     }
 
+    fn start_drag(&mut self, panel: PanelKind, dir: Dir) {
+        if self.displayed_layout(self.main_area.width) != self.layout {
+            self.message =
+                Some("The narrow-terminal layout is shown; make the window wider to resize".into());
+            return;
+        }
+        self.dragging = Some((panel, dir));
+    }
+
+    fn drag(&mut self, x: u16, y: u16) {
+        let Some((panel, dir)) = self.dragging else {
+            return;
+        };
+        let pos = match dir {
+            Dir::Rows => y,
+            Dir::Columns => x,
+        };
+        if super::layout::drag_divider(&mut self.layout, panel, dir, pos, self.main_area) {
+            self.layout_modified = true;
+        }
+    }
+
+    /// Releasing a dragged divider saves the layout, so it is kept next time.
+    fn end_drag(&mut self) {
+        if self.dragging.take().is_some() && self.layout_modified {
+            let mode = self.layout_mode;
+            self.save_layout();
+            self.layout_mode = mode;
+        }
+    }
+
     fn hit_at(&self, x: u16, y: u16) -> Option<Hit> {
         let pos = Position { x, y };
         self.hits
@@ -674,7 +711,12 @@ impl App {
     pub fn handle_mouse(&mut self, m: MouseEvent) -> Action {
         let hit = self.hit_at(m.column, m.row);
         match m.kind {
-            MouseEventKind::Down(MouseButton::Left) => self.click(hit),
+            MouseEventKind::Down(MouseButton::Left) => match hit {
+                Some(Hit::Divider(p, d)) if self.popup.is_none() => self.start_drag(p, d),
+                _ => self.click(hit),
+            },
+            MouseEventKind::Drag(MouseButton::Left) => self.drag(m.column, m.row),
+            MouseEventKind::Up(MouseButton::Left) => self.end_drag(),
             MouseEventKind::ScrollUp => self.scroll(hit, -1),
             MouseEventKind::ScrollDown => self.scroll(hit, 1),
             _ => {}
@@ -742,6 +784,7 @@ impl App {
                     CalView::Week => self.shift_days(7 * dir as i64),
                 }
             }
+            Hit::Divider(..) => {}
             Hit::Popup | Hit::CalendarToggle(_) => {}
         }
     }
