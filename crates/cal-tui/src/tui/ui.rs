@@ -29,8 +29,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     app.shown_panels = panels.iter().map(|(k, _)| *k).collect();
     app.hits.clear();
     let mut dividers = Dividers::new();
+    let mut focused_area = None;
     for (kind, area) in panels {
         let inner = take_dividers(area, main, &mut dividers);
+        if kind == app.focus && app.popup.is_none() {
+            focused_area = Some(inner);
+        }
         app.hits.push((inner, Hit::Panel(kind)));
         // Dividers can be dragged with the mouse.
         if inner.width < area.width {
@@ -48,7 +52,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             PanelKind::Todo => draw_todo(f, app, area),
         }
     }
-    draw_dividers(f, &dividers);
+    draw_dividers(f, &dividers, focused_area);
     draw_status(f, app, status);
     draw_keys(f, app, keys);
 
@@ -155,11 +159,31 @@ fn take_dividers(area: Rect, main: Rect, dividers: &mut Dividers) -> Rect {
     inner
 }
 
+/// Accent for the focused panel: its title and the dividers around it.
+const FOCUS: Color = Color::Cyan;
+/// Faint tint behind the focused panel's title row.
+const FOCUS_BAR: Color = Color::Rgb(0x1c, 0x2b, 0x38);
+
+/// Does divider cell (x, y) run along an edge of `r` (corners included)?
+fn borders(r: Rect, x: u16, y: u16) -> bool {
+    let (l, t) = (r.x.saturating_sub(1), r.y.saturating_sub(1));
+    let (rt, b) = (r.right(), r.bottom());
+    let in_cols = x >= l && x <= rt;
+    let in_rows = y >= t && y <= b;
+    ((x == l || x == rt) && in_rows) || ((y == t || y == b) && in_cols)
+}
+
 /// Draw dividers, joining lines where they meet (├ ┤ ┬ ┴ ┼ and corners).
-fn draw_dividers(f: &mut Frame, dividers: &Dividers) {
-    let style = Style::new().fg(Color::Indexed(240));
+/// The dividers around the focused panel are drawn in the accent colour.
+fn draw_dividers(f: &mut Frame, dividers: &Dividers, focused: Option<Rect>) {
+    let normal = Style::new().fg(Color::Indexed(240));
+    let accent = Style::new().fg(FOCUS);
     let buf = f.buffer_mut();
     for &(x, y) in dividers {
+        let style = match focused {
+            Some(r) if borders(r, x, y) => accent,
+            _ => normal,
+        };
         let has = |dx: i32, dy: i32| {
             let (nx, ny) = (x as i32 + dx, y as i32 + dy);
             nx >= 0 && ny >= 0 && dividers.contains(&(nx as u16, ny as u16))
@@ -184,7 +208,8 @@ fn draw_dividers(f: &mut Frame, dividers: &Dividers) {
 }
 
 /// Draw a panel's title row and return the area below it. The focused
-/// panel's title is bold in the accent colour (a yellow bar in layout mode).
+/// panel's title is bold in the accent colour on a tinted bar (a yellow bar
+/// in layout mode); other titles are dimmed.
 fn panel_frame(
     f: &mut Frame,
     app: &App,
@@ -205,9 +230,12 @@ fn panel_frame(
             Style::new().bg(Color::Yellow),
         )
     } else if focused {
-        (Line::from(text).bold().fg(Color::Cyan), Style::new())
+        (
+            Line::from(text).bold().fg(FOCUS),
+            Style::new().bg(FOCUS_BAR),
+        )
     } else {
-        (Line::from(text).fg(Color::Gray), Style::new())
+        (Line::from(text).fg(Color::Indexed(245)), Style::new())
     };
     let line = if center { line.centered() } else { line };
     f.render_widget(Paragraph::new(line).style(bar), row);
