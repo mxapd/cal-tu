@@ -39,6 +39,13 @@
             "query": "{uid}",
             "undo": true
           }
+        },
+        {
+          "label": "Delete",
+          "operation": "delete_todo",
+          "params": {
+            "query": "{uid}"
+          }
         }
       ],
       "add": {
@@ -47,15 +54,39 @@
       },
       "columns": [
         {
+          "edit": {
+            "operation": "edit_todo",
+            "params": {
+              "field": "summary",
+              "query": "{uid}",
+              "summary": "{value}"
+            }
+          },
           "key": "summary",
           "label": "Todo"
         },
         {
+          "edit": {
+            "operation": "edit_todo",
+            "params": {
+              "due": "{value}",
+              "field": "due",
+              "query": "{uid}"
+            }
+          },
           "key": "due",
           "label": "Due",
           "type": "date"
         },
         {
+          "edit": {
+            "operation": "edit_todo",
+            "params": {
+              "field": "priority",
+              "priority": "{value}",
+              "query": "{uid}"
+            }
+          },
           "key": "priority",
           "label": "Prio",
           "type": "number"

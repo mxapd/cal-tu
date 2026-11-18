@@ -1,7 +1,7 @@
 //! Add/edit forms: text inputs, prefilling from an item, and turning the
 //! input into core edit requests that contain only what the user changed.
 
-use cal_core::quick::{describe_repeat, parse_date, parse_length, parse_repeat, parse_time};
+use cal_core::quick::{describe_repeat, parse_repeat};
 use cal_core::{EventEdit, Instance, Moment, NewEvent, NewTodo, Scope, Store, Todo, TodoEdit};
 use chrono::{DateTime, Duration, NaiveDate, NaiveTime};
 use chrono_tz::Tz;
@@ -414,65 +414,12 @@ impl Form {
 
     /// Start and end from the Date/Start/End fields.
     fn span(&self, now: DateTime<Tz>) -> Result<(Moment, Moment), String> {
-        let home = now.timezone();
-        let today = now.date_naive();
-        let date_s = self.text(FieldId::Date);
-        let date = parse_date(&date_s, today)
-            .ok_or_else(|| format!("Date: cannot understand '{date_s}'"))?;
-        let start_s = self.text(FieldId::Start);
-        let end_s = self.text(FieldId::End);
-        if start_s.is_empty() {
-            // All day.
-            let end = if end_s.is_empty() {
-                date + Duration::days(1)
-            } else if let Some(last) = parse_date(&end_s, date) {
-                if last < date {
-                    return Err("End time: the last day is before the first".into());
-                }
-                last + Duration::days(1)
-            } else if let Some(len) = parse_length(&end_s) {
-                date + Duration::days(len.num_days().max(1))
-            } else {
-                return Err(format!(
-                    "End time: cannot understand '{end_s}' (a last day like 2026-12-24, or 3d)"
-                ));
-            };
-            return Ok((Moment::Date(date), Moment::Date(end)));
-        }
-        let t = parse_time(&start_s)
-            .ok_or_else(|| format!("Start time: cannot understand '{start_s}'"))?;
-        let start = cal_core::time::local_to_zoned(home, date.and_time(t));
-        let end = if end_s.is_empty() {
-            start + Duration::hours(1)
-        } else if let Some(et) = parse_time(&end_s) {
-            let d = if et <= t {
-                date + Duration::days(1)
-            } else {
-                date
-            };
-            cal_core::time::local_to_zoned(home, d.and_time(et))
-        } else if let Some(len) = parse_length(&end_s) {
-            start + len
-        } else {
-            let mut parts = end_s.split_whitespace();
-            let (d, tm) = (parts.next(), parts.next());
-            match (
-                d.and_then(|d| parse_date(d, date)),
-                tm.and_then(parse_time),
-                parts.next(),
-            ) {
-                (Some(d), Some(tm), None) => cal_core::time::local_to_zoned(home, d.and_time(tm)),
-                _ => {
-                    return Err(format!(
-                        "End time: cannot understand '{end_s}' (15:30, 1h30 or 2026-12-25 10:00)"
-                    ))
-                }
-            }
-        };
-        if end < start {
-            return Err("End time: before the start".into());
-        }
-        Ok((Moment::DateTime(start), Moment::DateTime(end)))
+        crate::ops::span(
+            &self.text(FieldId::Date),
+            &self.text(FieldId::Start),
+            &self.text(FieldId::End),
+            now,
+        )
     }
 
     fn notes(&self) -> Option<String> {

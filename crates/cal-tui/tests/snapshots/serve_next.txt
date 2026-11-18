@@ -5,6 +5,7 @@
     "calendar_name": "personal",
     "description": null,
     "end": "2026-11-16T13:00:00+01:00",
+    "id": "lunch-1",
     "kind": "event",
     "location": "Café Lisa",
     "read_only": false,

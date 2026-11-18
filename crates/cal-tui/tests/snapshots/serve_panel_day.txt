@@ -1,0 +1,135 @@
+{
+  "blocks": [
+    {
+      "text": "### Monday 16 November 2026\n\n#### 08:15-10:00 Linear Algebra, lecture\n*University* · at Hall A · repeats FREQ=WEEKLY;UNTIL=20261231T235959Z;INTERVAL=1;BYDAY=MO;WKST=MO · read-only\n\n#### 12:00-13:00 Lunch with Anna\n*personal* · at Café Lisa\n\n#### 18:30-20:00 Climbing\n*personal* · repeats FREQ=WEEKLY;BYDAY=MO,WE\nReminder: 30m before",
+      "type": "markdown"
+    },
+    {
+      "actions": [
+        {
+          "label": "Delete",
+          "operation": "delete_event",
+          "params": {
+            "id": "{id}"
+          }
+        },
+        {
+          "label": "Delete every occurrence",
+          "operation": "delete_event",
+          "params": {
+            "all": true,
+            "id": "{id}"
+          }
+        }
+      ],
+      "add": {
+        "label": "Add event",
+        "operation": "add_event"
+      },
+      "columns": [
+        {
+          "edit": {
+            "operation": "edit_event",
+            "params": {
+              "date": "{value}",
+              "field": "date",
+              "id": "{id}"
+            }
+          },
+          "key": "day",
+          "label": "Day",
+          "type": "date"
+        },
+        {
+          "edit": {
+            "operation": "edit_event",
+            "params": {
+              "field": "time",
+              "id": "{id}",
+              "time": "{value}"
+            }
+          },
+          "key": "time",
+          "label": "Time"
+        },
+        {
+          "edit": {
+            "operation": "edit_event",
+            "params": {
+              "field": "summary",
+              "id": "{id}",
+              "summary": "{value}"
+            }
+          },
+          "key": "summary",
+          "label": "Event"
+        },
+        {
+          "edit": {
+            "operation": "edit_event",
+            "params": {
+              "field": "location",
+              "id": "{id}",
+              "location": "{value}"
+            }
+          },
+          "key": "location",
+          "label": "Where"
+        },
+        {
+          "key": "calendar",
+          "label": "Calendar"
+        }
+      ],
+      "id": "events",
+      "row_key": "row",
+      "rows": [
+        {
+          "calendar": "University",
+          "day": {
+            "t": "Mon 16 Nov",
+            "v": "2026-11-16"
+          },
+          "id": "040000008200E00074C5B7101A82E008@2026-11-16T08:15:00+01:00",
+          "location": "Hall A",
+          "row": "040000008200E00074C5B7101A82E008@2026-11-16T08:15:00+01:00|2026-11-16",
+          "summary": "Linear Algebra, lecture",
+          "time": "08:15-10:00"
+        },
+        {
+          "calendar": "personal",
+          "day": {
+            "t": "Mon 16 Nov",
+            "v": "2026-11-16"
+          },
+          "id": "lunch-1",
+          "location": "Café Lisa",
+          "row": "lunch-1|2026-11-16",
+          "summary": "Lunch with Anna",
+          "time": "12:00-13:00"
+        },
+        {
+          "calendar": "personal",
+          "day": {
+            "t": "Mon 16 Nov",
+            "v": "2026-11-16"
+          },
+          "id": "climb-1@2026-11-16T18:30:00+01:00",
+          "location": "",
+          "row": "climb-1@2026-11-16T18:30:00+01:00|2026-11-16",
+          "summary": "Climbing",
+          "time": "18:30-20:00"
+        }
+      ],
+      "title": "Mon 16 Nov",
+      "type": "table"
+    }
+  ],
+  "order": 15,
+  "params": {
+    "day": "2026-11-16"
+  },
+  "summary": "Mon 16 Nov: 3 events",
+  "title": "Day",
+  "updated": "2026-11-16 11:32"
+}

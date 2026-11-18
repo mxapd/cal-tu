@@ -24,25 +24,74 @@
       "type": "stats"
     },
     {
+      "actions": [
+        {
+          "label": "Delete",
+          "operation": "delete_event",
+          "params": {
+            "id": "{id}"
+          }
+        },
+        {
+          "label": "Delete every occurrence",
+          "operation": "delete_event",
+          "params": {
+            "all": true,
+            "id": "{id}"
+          }
+        }
+      ],
       "add": {
         "label": "Add event",
         "operation": "add_event"
       },
       "columns": [
         {
+          "edit": {
+            "operation": "edit_event",
+            "params": {
+              "date": "{value}",
+              "field": "date",
+              "id": "{id}"
+            }
+          },
           "key": "day",
           "label": "Day",
           "type": "date"
         },
         {
+          "edit": {
+            "operation": "edit_event",
+            "params": {
+              "field": "time",
+              "id": "{id}",
+              "time": "{value}"
+            }
+          },
           "key": "time",
           "label": "Time"
         },
         {
+          "edit": {
+            "operation": "edit_event",
+            "params": {
+              "field": "summary",
+              "id": "{id}",
+              "summary": "{value}"
+            }
+          },
           "key": "summary",
           "label": "Event"
         },
         {
+          "edit": {
+            "operation": "edit_event",
+            "params": {
+              "field": "location",
+              "id": "{id}",
+              "location": "{value}"
+            }
+          },
           "key": "location",
           "label": "Where"
         },
@@ -51,8 +100,8 @@
           "label": "Calendar"
         }
       ],
-      "id": "agenda",
-      "row_key": "id",
+      "id": "events",
+      "row_key": "row",
       "rows": [
         {
           "calendar": "University",
@@ -60,8 +109,9 @@
             "t": "Mon 16 Nov",
             "v": "2026-11-16"
           },
-          "id": "040000008200E00074C5B7101A82E008|2026-11-16|2026-11-16T08:15:00+01:00",
+          "id": "040000008200E00074C5B7101A82E008@2026-11-16T08:15:00+01:00",
           "location": "Hall A",
+          "row": "040000008200E00074C5B7101A82E008@2026-11-16T08:15:00+01:00|2026-11-16",
           "summary": "Linear Algebra, lecture",
           "time": "08:15-10:00"
         },
@@ -71,8 +121,9 @@
             "t": "Mon 16 Nov",
             "v": "2026-11-16"
           },
-          "id": "lunch-1|2026-11-16|2026-11-16T12:00:00+01:00",
+          "id": "lunch-1",
           "location": "Café Lisa",
+          "row": "lunch-1|2026-11-16",
           "summary": "Lunch with Anna",
           "time": "12:00-13:00"
         },
@@ -82,8 +133,9 @@
             "t": "Mon 16 Nov",
             "v": "2026-11-16"
           },
-          "id": "climb-1|2026-11-16|2026-11-16T18:30:00+01:00",
+          "id": "climb-1@2026-11-16T18:30:00+01:00",
           "location": "",
+          "row": "climb-1@2026-11-16T18:30:00+01:00|2026-11-16",
           "summary": "Climbing",
           "time": "18:30-20:00"
         },
@@ -93,8 +145,9 @@
             "t": "Tue 17 Nov",
             "v": "2026-11-17"
           },
-          "id": "float-1|2026-11-17|2026-11-17T09:00:00+01:00",
+          "id": "float-1",
           "location": "",
+          "row": "float-1|2026-11-17",
           "summary": "Floating standup",
           "time": "09:00-09:45"
         },
@@ -104,8 +157,9 @@
             "t": "Wed 18 Nov",
             "v": "2026-11-18"
           },
-          "id": "climb-1|2026-11-18|2026-11-18T18:30:00+01:00",
+          "id": "climb-1@2026-11-18T18:30:00+01:00",
           "location": "",
+          "row": "climb-1@2026-11-18T18:30:00+01:00|2026-11-18",
           "summary": "Climbing",
           "time": "18:30-20:00"
         },
@@ -115,8 +169,9 @@
             "t": "Fri 20 Nov",
             "v": "2026-11-20"
           },
-          "id": "trip-1|2026-11-20|2026-11-20T00:00:00+01:00",
+          "id": "trip-1",
           "location": "",
+          "row": "trip-1|2026-11-20",
           "summary": "Weekend trip",
           "time": "all day"
         },
@@ -126,8 +181,9 @@
             "t": "Sat 21 Nov",
             "v": "2026-11-21"
           },
-          "id": "trip-1|2026-11-21|2026-11-20T00:00:00+01:00",
+          "id": "trip-1",
           "location": "",
+          "row": "trip-1|2026-11-21",
           "summary": "Weekend trip",
           "time": "all day"
         },
@@ -137,8 +193,9 @@
             "t": "Sun 22 Nov",
             "v": "2026-11-22"
           },
-          "id": "trip-1|2026-11-22|2026-11-20T00:00:00+01:00",
+          "id": "trip-1",
           "location": "",
+          "row": "trip-1|2026-11-22",
           "summary": "Weekend trip",
           "time": "all day"
         }

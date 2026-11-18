@@ -128,6 +128,137 @@
         "type": "object"
       }
     },
+    "delete_event": {
+      "description": "Delete an event. For an occurrence of a repeating event (an id with @), only that occurrence unless all is set.",
+      "kind": "command",
+      "params": {
+        "properties": {
+          "all": {
+            "default": false,
+            "description": "delete every occurrence of a repeating event",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "the event's id, from agenda/today/next",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      }
+    },
+    "delete_todo": {
+      "description": "Delete a todo, found by its uid or (part of) its title.",
+      "kind": "command",
+      "params": {
+        "properties": {
+          "query": {
+            "description": "the todo's uid, or (part of) its title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    },
+    "edit_event": {
+      "description": "Change an event: its title, place, notes, day or time. For an occurrence of a repeating event (an id with @), only that occurrence unless all is set.",
+      "kind": "command",
+      "params": {
+        "properties": {
+          "all": {
+            "default": false,
+            "description": "change every occurrence of a repeating event",
+            "type": "boolean"
+          },
+          "date": {
+            "description": "move to this day: YYYY-MM-DD, MM-DD, tomorrow, fri, +3d",
+            "type": "string"
+          },
+          "description": {
+            "description": "new notes; \"\" clears them",
+            "type": "string"
+          },
+          "field": {
+            "description": "for panel cells: the field being edited; left out, it is cleared",
+            "enum": [
+              "summary",
+              "location",
+              "description",
+              "date",
+              "time"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "description": "the event's id, from agenda/today/next",
+            "type": "string"
+          },
+          "location": {
+            "description": "new place; \"\" clears it",
+            "type": "string"
+          },
+          "summary": {
+            "description": "new title",
+            "type": "string"
+          },
+          "time": {
+            "description": "14:00-15:30, 14:00 (keeps the length) or \"all day\"",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      }
+    },
+    "edit_todo": {
+      "description": "Change a todo, found by its uid or (part of) its title: title, due date, priority or notes.",
+      "kind": "command",
+      "params": {
+        "properties": {
+          "description": {
+            "description": "new notes; \"\" clears them",
+            "type": "string"
+          },
+          "due": {
+            "description": "new due date, optionally with a time (fri, 12-24, \"tomorrow 9am\"); \"\" clears it",
+            "type": "string"
+          },
+          "field": {
+            "description": "for panel cells: the field being edited; left out, it is cleared",
+            "enum": [
+              "summary",
+              "due",
+              "priority",
+              "description"
+            ],
+            "type": "string"
+          },
+          "priority": {
+            "description": "1 (highest) – 9; 0 for none",
+            "type": "integer"
+          },
+          "query": {
+            "description": "the todo's uid, or (part of) its title",
+            "type": "string"
+          },
+          "summary": {
+            "description": "new title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    },
     "next": {
       "description": "The next timed event that has not started yet.",
       "kind": "read",
@@ -141,6 +272,38 @@
         },
         "type": "object"
       }
+    },
+    "panel_day": {
+      "description": "One day in full: each event's place, notes, repeat rule and reminders, to change in place.",
+      "kind": "panel",
+      "order": 15,
+      "panel": "day",
+      "params": {
+        "properties": {
+          "day": {
+            "description": "YYYY-MM-DD, MM-DD, tomorrow, fri or +3d; default today",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "title": "Day"
+    },
+    "panel_month": {
+      "description": "A month as a grid: a dot per event on each day.",
+      "kind": "panel",
+      "order": 5,
+      "panel": "month",
+      "params": {
+        "properties": {
+          "month": {
+            "description": "YYYY-MM, this, next, last, +2 or -1; default this month",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "title": "Month"
     },
     "panel_todos": {
       "description": "The todos as a table: tick them off, or add one.",

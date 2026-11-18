@@ -3,6 +3,7 @@
   "calendar_name": "personal",
   "kind": "event",
   "uid": "lunch-1",
+  "id": "lunch-1",
   "summary": "Lunch with Anna",
   "location": "Café Lisa",
   "description": null,

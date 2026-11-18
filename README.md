@@ -126,15 +126,35 @@ operations to AIs as tools (`calendar__agenda`, ...). Each answer is JSON
 | `add_event` | command | `text` (as `cal-tui add`: "Dentist fri 14:00 1h"), `calendar`, `location`, `description`, `remind`, `repeat`, `dry_run` |
 | `add_todo` | command | `summary`, `due`, `priority`, `calendar`, `description` |
 | `complete_todo` | command | `query` (uid or part of the title), `undo` |
+| `edit_event` | command | `id`, `summary`, `location`, `description`, `date`, `time` (14:00-15:30, 14:00, all day), `all` |
+| `delete_event` | command | `id`, `all` |
+| `edit_todo` | command | `query`, `summary`, `due`, `priority`, `description` (`""` clears) |
+| `delete_todo` | command | `query` |
+| `panel_month` | panel | `month` (2026-12, next, -1) |
 | `panel_week` | panel | `from`, `days` |
+| `panel_day` | panel | `day` |
 | `panel_todos` | panel | `all` |
 
-The two panels are tabs of the calendar in `jarvis ls`, next to the cal-tui
-tab: **Week** (today, the next event, the todos as tiles, then the events by
-day, with "Add event") and **Todos** (a table to tick off: Done, Not done,
-"Add todo"). Their actions are the commands above, which Jarvis confirms with
-you first; `=` changes a panel's range. Panels are for you only: Jarvis never
-offers them to AIs.
+Every event in the answers has an `id`: its UID, plus `@<start>` for one
+occurrence of a repeating event. `edit_event` and `delete_event` with such an
+id change only that occurrence, unless `all` is set.
+
+The panels are the calendar's tabs in `jarvis ls`:
+
+- **Month**: a grid of the month, a dot per event, `[n]` for today.
+- **Week**: today, the next event and the todos as tiles, then the events by
+  day.
+- **Day**: one day in full (place, notes, repeat rule, reminders), then its
+  events.
+- **Todos**: the todos to tick off.
+
+Events are changed where they are listed, in Week and Day: enter on a Day,
+Time, Event or Where cell edits it (a new day moves the event, an emptied cell
+clears it), and a row's actions delete the occurrence or the whole series.
+Todos are changed in the Todos table the same way (title, due, priority;
+Done, Not done, Delete). Every change is one of the commands above, and Jarvis
+asks you first; `=` changes a panel's range. Panels are for you only: Jarvis
+never offers them to AIs.
 
 ```sh
 head -c 32 /dev/urandom | base64 > ~/.config/cal-tui/token

@@ -12,6 +12,9 @@ pub struct JsonItem<'a> {
     calendar_name: &'a str,
     kind: &'static str,
     uid: &'a str,
+    /// What to name it by to change it: the UID, plus `@<start>` for one
+    /// occurrence of a series.
+    id: String,
     summary: &'a str,
     location: Option<&'a str>,
     description: Option<&'a str>,
@@ -39,6 +42,7 @@ pub fn json_item<'a>(store: &'a Store, i: &'a Instance) -> JsonItem<'a> {
             Kind::Todo => "todo",
         },
         uid: &i.uid,
+        id: crate::ops::event_id(store, i),
         summary: &i.summary,
         location: i.location.as_deref(),
         description: i.description.as_deref(),

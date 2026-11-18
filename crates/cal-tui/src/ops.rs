@@ -5,8 +5,10 @@
 //! todo) are [`UserError`]s, so that `serve` can answer them with 400.
 
 use anyhow::Result;
+use cal_core::quick::{parse_date, parse_length, parse_time};
+use cal_core::Moment;
 use cal_core::{Config, EditError, Instance, Kind, NewEvent, NewTodo, Store, Todo};
-use chrono::DateTime;
+use chrono::{DateTime, Duration};
 use chrono_tz::Tz;
 
 /// A mistake in the request rather than a failure.
@@ -201,4 +203,175 @@ pub fn complete_todo(store: &Store, query: &str, undo: bool, now: DateTime<Tz>) 
     let t = find_todo(store, query, undo)?;
     store.set_todo_completed(t.object, !undo, now.with_timezone(&chrono::Utc))?;
     Ok(t)
+}
+
+/// Start and end from a date, a start time and an end (a time, a length or a
+/// last day), as the event form and `serve` take them. No start time: all day.
+pub fn span(
+    date_s: &str,
+    start_s: &str,
+    end_s: &str,
+    now: DateTime<Tz>,
+) -> Result<(Moment, Moment), String> {
+    let home = now.timezone();
+    let today = now.date_naive();
+    let date =
+        parse_date(date_s, today).ok_or_else(|| format!("Date: cannot understand '{date_s}'"))?;
+    if start_s.is_empty() {
+        // All day.
+        let end = if end_s.is_empty() {
+            date + Duration::days(1)
+        } else if let Some(last) = parse_date(end_s, date) {
+            if last < date {
+                return Err("End time: the last day is before the first".into());
+            }
+            last + Duration::days(1)
+        } else if let Some(len) = parse_length(end_s) {
+            date + Duration::days(len.num_days().max(1))
+        } else {
+            return Err(format!(
+                "End time: cannot understand '{end_s}' (a last day like 2026-12-24, or 3d)"
+            ));
+        };
+        return Ok((Moment::Date(date), Moment::Date(end)));
+    }
+    let t =
+        parse_time(start_s).ok_or_else(|| format!("Start time: cannot understand '{start_s}'"))?;
+    let start = cal_core::time::local_to_zoned(home, date.and_time(t));
+    let end = if end_s.is_empty() {
+        start + Duration::hours(1)
+    } else if let Some(et) = parse_time(end_s) {
+        let d = if et <= t {
+            date + Duration::days(1)
+        } else {
+            date
+        };
+        cal_core::time::local_to_zoned(home, d.and_time(et))
+    } else if let Some(len) = parse_length(end_s) {
+        start + len
+    } else {
+        let mut parts = end_s.split_whitespace();
+        let (d, tm) = (parts.next(), parts.next());
+        match (
+            d.and_then(|d| parse_date(d, date)),
+            tm.and_then(parse_time),
+            parts.next(),
+        ) {
+            (Some(d), Some(tm), None) => cal_core::time::local_to_zoned(home, d.and_time(tm)),
+            _ => {
+                return Err(format!(
+                    "End time: cannot understand '{end_s}' (15:30, 1h30 or 2026-12-25 10:00)"
+                ))
+            }
+        }
+    };
+    if end < start {
+        return Err("End time: before the start".into());
+    }
+    Ok((Moment::DateTime(start), Moment::DateTime(end)))
+}
+
+/// How an event is named from outside: its UID, plus `@` and the original
+/// start of the occurrence (RECURRENCE-ID) for one occurrence of a series.
+pub fn event_id(store: &Store, i: &Instance) -> String {
+    match &i.recurrence_id {
+        Some(rid) => format!("{}@{}", i.uid, crate::output::moment_json(rid, store.home)),
+        None => i.uid.clone(),
+    }
+}
+
+/// An event an [`event_id`] names, as it is now.
+pub struct EventRef {
+    pub obj: usize,
+    /// The occurrence, for one occurrence of a series.
+    pub rid: Option<Moment>,
+    pub summary: String,
+    /// Start and end of what was named: the occurrence, or the event.
+    pub start: Moment,
+    pub end: Moment,
+}
+
+impl EventRef {
+    /// The whole series with `all`, else what was named.
+    pub fn scope(&self, all: bool) -> cal_core::Scope {
+        match (&self.rid, all) {
+            (Some(rid), false) => cal_core::Scope::Occurrence(*rid),
+            _ => cal_core::Scope::All,
+        }
+    }
+}
+
+/// A RECURRENCE-ID as [`event_id`] writes it.
+fn parse_rid(s: &str, home: Tz) -> Option<Moment> {
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        return Some(Moment::Date(d));
+    }
+    DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|dt| Moment::DateTime(dt.with_timezone(&home)))
+}
+
+/// Find the event `id` names. UIDs may contain `@` themselves, so only a
+/// suffix that reads as a date or time is taken as the occurrence.
+pub fn find_event(store: &Store, id: &str) -> Result<EventRef> {
+    let id = id.trim();
+    let (uid, rid) = match id.rsplit_once('@') {
+        Some((uid, r)) => match parse_rid(r, store.home) {
+            Some(rid) => (uid, Some(rid)),
+            None => (id, None),
+        },
+        None => (id, None),
+    };
+    let obj = store
+        .objects
+        .iter()
+        .position(|o| o.kind == Kind::Event && o.uid == uid)
+        .ok_or_else(|| user(format!("no event with id '{id}'")))?;
+    let o = &store.objects[obj];
+    let Some(rid) = rid else {
+        let (start, end) = cal_core::recur::span(&o.master, store.home)
+            .map_err(|e| anyhow::anyhow!("{id}: {e}"))?;
+        return Ok(EventRef {
+            obj,
+            rid: None,
+            summary: o
+                .master
+                .prop("SUMMARY")
+                .map(|p| p.value.clone())
+                .unwrap_or_default(),
+            start,
+            end,
+        });
+    };
+    // The occurrence, as it is now (it may have been moved).
+    let day = rid.instant(store.home).date_naive();
+    let (inst, _) = store.instances(
+        store.day_start(day - Duration::days(1)),
+        store.day_start(day + Duration::days(2)),
+    );
+    let i = inst
+        .iter()
+        .find(|i| {
+            i.object == obj
+                && i.recurrence_id
+                    .is_some_and(|r| cal_core::recur::same_occurrence(&r, &rid, store.home))
+        })
+        .ok_or_else(|| {
+            user(format!(
+                "no occurrence '{id}' (deleted, or moved by a sync?)"
+            ))
+        })?;
+    Ok(EventRef {
+        obj,
+        rid: Some(rid),
+        summary: i.summary.clone(),
+        start: i.start,
+        end: i.end,
+    })
+}
+
+/// Find a todo, open ones first, then done ones.
+pub fn find_any_todo(store: &Store, query: &str) -> Result<Todo> {
+    find_todo(store, query, false)
+        .or_else(|open_err| find_todo(store, query, true).map_err(|_| open_err))
 }

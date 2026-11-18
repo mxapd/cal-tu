@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration as StdDuration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
-use cal_core::{Config, Store};
+use cal_core::{Config, EventEdit, Moment, Scope, Store, TodoEdit};
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use chrono_tz::Tz;
 use serde_json::{json, Map, Value};
@@ -143,6 +143,81 @@ const OPERATIONS: &[Op] = &[
                 "query": {"type": "string", "description": "the todo's uid, or (part of) its title"},
                 "undo": {"type": "boolean", "description": "mark it not done instead", "default": false}
             }, "required": ["query"]})
+        },
+    },
+    Op {
+        name: "edit_event",
+        kind: "command",
+        description: "Change an event: its title, place, notes, day or time. For an occurrence of a repeating event (an id with @), only that occurrence unless all is set.",
+        params: || {
+            json!({"type": "object", "properties": {
+                "id": {"type": "string", "description": "the event's id, from agenda/today/next"},
+                "summary": {"type": "string", "description": "new title"},
+                "location": {"type": "string", "description": "new place; \"\" clears it"},
+                "description": {"type": "string", "description": "new notes; \"\" clears them"},
+                "date": {"type": "string", "description": "move to this day: YYYY-MM-DD, MM-DD, tomorrow, fri, +3d"},
+                "time": {"type": "string", "description": "14:00-15:30, 14:00 (keeps the length) or \"all day\""},
+                "all": {"type": "boolean", "description": "change every occurrence of a repeating event", "default": false},
+                "field": {"type": "string", "enum": ["summary", "location", "description", "date", "time"],
+                          "description": "for panel cells: the field being edited; left out, it is cleared"}
+            }, "required": ["id"]})
+        },
+    },
+    Op {
+        name: "delete_event",
+        kind: "command",
+        description: "Delete an event. For an occurrence of a repeating event (an id with @), only that occurrence unless all is set.",
+        params: || {
+            json!({"type": "object", "properties": {
+                "id": {"type": "string", "description": "the event's id, from agenda/today/next"},
+                "all": {"type": "boolean", "description": "delete every occurrence of a repeating event", "default": false}
+            }, "required": ["id"]})
+        },
+    },
+    Op {
+        name: "edit_todo",
+        kind: "command",
+        description: "Change a todo, found by its uid or (part of) its title: title, due date, priority or notes.",
+        params: || {
+            json!({"type": "object", "properties": {
+                "query": {"type": "string", "description": "the todo's uid, or (part of) its title"},
+                "summary": {"type": "string", "description": "new title"},
+                "due": {"type": "string", "description": "new due date, optionally with a time (fri, 12-24, \"tomorrow 9am\"); \"\" clears it"},
+                "priority": {"type": "integer", "description": "1 (highest) – 9; 0 for none"},
+                "description": {"type": "string", "description": "new notes; \"\" clears them"},
+                "field": {"type": "string", "enum": ["summary", "due", "priority", "description"],
+                          "description": "for panel cells: the field being edited; left out, it is cleared"}
+            }, "required": ["query"]})
+        },
+    },
+    Op {
+        name: "delete_todo",
+        kind: "command",
+        description: "Delete a todo, found by its uid or (part of) its title.",
+        params: || {
+            json!({"type": "object", "properties": {
+                "query": {"type": "string", "description": "the todo's uid, or (part of) its title"}
+            }, "required": ["query"]})
+        },
+    },
+    Op {
+        name: "panel_month",
+        kind: "panel",
+        description: "A month as a grid: a dot per event on each day.",
+        params: || {
+            json!({"type": "object", "properties": {
+                "month": {"type": "string", "description": "YYYY-MM, this, next, last, +2 or -1; default this month"}
+            }})
+        },
+    },
+    Op {
+        name: "panel_day",
+        kind: "panel",
+        description: "One day in full: each event's place, notes, repeat rule and reminders, to change in place.",
+        params: || {
+            json!({"type": "object", "properties": {
+                "day": {"type": "string", "description": "YYYY-MM-DD, MM-DD, tomorrow, fri or +3d; default today"}
+            }})
         },
     },
     Op {
@@ -399,6 +474,37 @@ impl App {
                 Ok(panels::week(&store, from, days, now))
             }
             "panel_todos" => Ok(panels::todos(&store, p.bool("all")?, now)),
+            "panel_day" => Ok(panels::day(&store, p.day("day", today)?, now)),
+            "panel_month" => {
+                let m = p.str("month")?.unwrap_or_default();
+                let first = panels::parse_month(&m, today).ok_or_else(|| {
+                    user(format!(
+                        "month: cannot read '{m}' (YYYY-MM, this, next, last, +2, -1)"
+                    ))
+                })?;
+                Ok(panels::month(&store, first, now))
+            }
+            "edit_event" => edit_event(&store, p, now),
+            "delete_event" => {
+                let r = ops::find_event(&store, &p.required("id")?)?;
+                let scope = r.scope(p.bool("all")?);
+                store.delete(r.obj, scope, now.with_timezone(&Utc))?;
+                let when = output::describe_span(&r.start, &r.end, store.home);
+                let text = match (scope, r.rid.is_some()) {
+                    (Scope::Occurrence(_), _) => {
+                        format!("Deleted this occurrence: {} ({when})", r.summary)
+                    }
+                    (Scope::All, true) => format!("Deleted all occurrences: {}", r.summary),
+                    (Scope::All, false) => format!("Deleted: {} ({when})", r.summary),
+                };
+                Ok(json!({"deleted": p.required("id")?, "text": text}))
+            }
+            "edit_todo" => edit_todo(&store, p, now),
+            "delete_todo" => {
+                let t = ops::find_any_todo(&store, &p.required("query")?)?;
+                store.delete(t.object, Scope::All, now.with_timezone(&Utc))?;
+                Ok(json!({"deleted": t.uid, "text": format!("Deleted todo: {}", t.summary)}))
+            }
             "next" => {
                 let within = p.int_in("within", 7, 1, MAX_NEXT_DAYS)?;
                 let (inst, _) = store.instances(now, now + Duration::days(within));
@@ -521,6 +627,154 @@ impl App {
             .collect();
         json!({"calendars": cals, "text": lines.join("\n") + "\n"})
     }
+}
+
+/// A text field that can be cleared: `""`, or left out while `field` names
+/// it (a panel cell emptied), clears it.
+fn clearable(p: &Params, key: &str, field: Option<&str>) -> Result<Option<Option<String>>> {
+    Ok(match p.str(key)? {
+        Some(s) => Some(Some(s)),
+        None if p.0.contains_key(key) || field == Some(key) => Some(None),
+        None => None,
+    })
+}
+
+/// A length as `parse_length` reads it back.
+fn length_text(start: &Moment, end: &Moment, home: Tz) -> String {
+    format!(
+        "{}m",
+        (end.instant(home) - start.instant(home))
+            .num_minutes()
+            .max(1)
+    )
+}
+
+fn edit_event(store: &Store, p: &Params, now: DateTime<Tz>) -> Result<Value> {
+    let r = ops::find_event(store, &p.required("id")?)?;
+    let all = p.bool("all")?;
+    let field = p.str("field")?;
+    let field = field.as_deref();
+    let home = store.home;
+    let mut edit = EventEdit {
+        summary: p.str("summary")?,
+        location: clearable(p, "location", field)?,
+        description: clearable(p, "description", field)?,
+        ..Default::default()
+    };
+    if field == Some("summary") && edit.summary.is_none() {
+        return Err(user("the title cannot be empty"));
+    }
+    let (date, time) = (p.str("date")?, p.str("time")?);
+    if field == Some("date") && date.is_none() {
+        return Err(user("give a day to move it to (YYYY-MM-DD, fri, +3d)"));
+    }
+    if field == Some("time") && time.is_none() {
+        return Err(user("give a time: 14:00-15:30, 14:00 or all day"));
+    }
+    if date.is_some() || time.is_some() {
+        let date_s = date.unwrap_or_else(|| {
+            r.start
+                .instant(home)
+                .date_naive()
+                .format("%Y-%m-%d")
+                .to_string()
+        });
+        let (start_s, end_s) = match time.as_deref().map(str::trim) {
+            Some(t) if t.eq_ignore_ascii_case("all day") => (String::new(), String::new()),
+            Some(t) => match t.split_once('-') {
+                Some((a, b)) => (a.trim().to_string(), b.trim().to_string()),
+                None => (t.to_string(), length_text(&r.start, &r.end, home)),
+            },
+            // Keep the time of day and the length.
+            None => match (r.start, r.end) {
+                (Moment::Date(s), Moment::Date(e)) => {
+                    (String::new(), format!("{}d", (e - s).num_days().max(1)))
+                }
+                (s, e) => (
+                    s.instant(home).format("%H:%M").to_string(),
+                    length_text(&s, &e, home),
+                ),
+            },
+        };
+        edit.time = Some(ops::span(&date_s, &start_s, &end_s, now).map_err(user)?);
+    }
+    if edit.summary.is_none()
+        && edit.location.is_none()
+        && edit.description.is_none()
+        && edit.time.is_none()
+    {
+        return Err(user(
+            "nothing to change: give summary, location, description, date or time",
+        ));
+    }
+    let scope = r.scope(all);
+    store.update_event(r.obj, scope, r.start, &edit, now.with_timezone(&Utc))?;
+    let title = edit.summary.clone().unwrap_or_else(|| r.summary.clone());
+    let what = match (scope, r.rid.is_some()) {
+        (Scope::Occurrence(_), _) => "this occurrence of ",
+        (Scope::All, true) => "all occurrences of ",
+        (Scope::All, false) => "",
+    };
+    let mut text = format!("Updated {what}{title}");
+    if let Some((s, e)) = &edit.time {
+        text.push_str(&format!(": {}", output::describe_span(s, e, home)));
+    }
+    Ok(json!({"updated": p.required("id")?, "text": text}))
+}
+
+fn edit_todo(store: &Store, p: &Params, now: DateTime<Tz>) -> Result<Value> {
+    let t = ops::find_any_todo(store, &p.required("query")?)?;
+    let field = p.str("field")?;
+    let field = field.as_deref();
+    let summary = p.str("summary")?;
+    if field == Some("summary") && summary.is_none() {
+        return Err(user("the title cannot be empty"));
+    }
+    let due = match p.str("due")? {
+        Some(d) => Some(Some(cal_core::quick::parse_due(&d, now).map_err(user)?)),
+        None if p.0.contains_key("due") || field == Some("due") => Some(None),
+        None => None,
+    };
+    let priority = if p.get("priority").is_some_and(|v| v.as_str() != Some("")) {
+        Some(p.int_in("priority", 0, 0, 9)? as u8)
+    } else if field == Some("priority") {
+        Some(0)
+    } else {
+        None
+    };
+    let edit = TodoEdit {
+        summary,
+        due,
+        priority,
+        description: clearable(p, "description", field)?,
+    };
+    if edit.summary.is_none()
+        && edit.due.is_none()
+        && edit.priority.is_none()
+        && edit.description.is_none()
+    {
+        return Err(user(
+            "nothing to change: give summary, due, priority or description",
+        ));
+    }
+    store.update_todo(t.object, &edit, now.with_timezone(&Utc))?;
+    let mut changes = Vec::new();
+    match &edit.due {
+        Some(Some(d)) => changes.push(format!("due {}", report::due_text(d, store.home))),
+        Some(None) => changes.push("no due date".into()),
+        None => {}
+    }
+    match edit.priority {
+        Some(0) => changes.push("no priority".into()),
+        Some(n) => changes.push(format!("priority {n}")),
+        None => {}
+    }
+    let title = edit.summary.clone().unwrap_or(t.summary.clone());
+    let mut text = format!("Updated todo: {title}");
+    if !changes.is_empty() {
+        text.push_str(&format!(" ({})", changes.join(", ")));
+    }
+    Ok(json!({"updated": t.uid, "text": text}))
 }
 
 /// Items from `from` on for `days` days, and as markdown by day.
@@ -680,6 +934,12 @@ impl Params {
     fn int_in(&self, key: &str, default: i64, min: i64, max: i64) -> Result<i64> {
         let n = match self.get(key) {
             None => return Ok(default),
+            Some(Value::String(t)) if t.trim().is_empty() => return Ok(default),
+            // A number typed into a form may come as text.
+            Some(Value::String(t)) => t
+                .trim()
+                .parse()
+                .map_err(|_| user(format!("{key} should be a whole number, not '{t}'")))?,
             Some(v) => v
                 .as_i64()
                 .or_else(|| v.as_f64().filter(|f| f.fract() == 0.0).map(|f| f as i64))
