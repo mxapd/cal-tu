@@ -343,18 +343,32 @@ pub fn find_event(store: &Store, id: &str) -> Result<EventRef> {
             end,
         });
     };
-    // The occurrence, as it is now (it may have been moved).
-    let day = rid.instant(store.home).date_naive();
-    let (inst, _) = store.instances(
-        store.day_start(day - Duration::days(1)),
-        store.day_start(day + Duration::days(2)),
-    );
-    let i = inst
-        .iter()
-        .find(|i| {
-            i.object == obj
-                && i.recurrence_id
-                    .is_some_and(|r| cal_core::recur::same_occurrence(&r, &rid, store.home))
+    // The occurrence, as it is now. It is looked for around its original
+    // day, and, when it has an override that moved it further, around the
+    // day it was moved to.
+    let home = store.home;
+    let mut days = vec![rid.instant(home).date_naive()];
+    for ov in &o.overrides {
+        let same = ov
+            .prop("RECURRENCE-ID")
+            .and_then(|p| cal_core::time::parse_moment(p, home).ok())
+            .is_some_and(|r| cal_core::recur::same_occurrence(&r, &rid, home));
+        if let (true, Ok((start, _))) = (same, cal_core::recur::span(ov, home)) {
+            days.push(start.instant(home).date_naive());
+        }
+    }
+    let i = days
+        .into_iter()
+        .find_map(|day| {
+            let (inst, _) = store.instances(
+                store.day_start(day - Duration::days(1)),
+                store.day_start(day + Duration::days(2)),
+            );
+            inst.into_iter().find(|i| {
+                i.object == obj
+                    && i.recurrence_id
+                        .is_some_and(|r| cal_core::recur::same_occurrence(&r, &rid, home))
+            })
         })
         .ok_or_else(|| {
             user(format!(
@@ -371,7 +385,18 @@ pub fn find_event(store: &Store, id: &str) -> Result<EventRef> {
 }
 
 /// Find a todo, open ones first, then done ones.
+/// Done ones are only looked at when no open todo matches: a query that
+/// matches several open todos stays an error.
 pub fn find_any_todo(store: &Store, query: &str) -> Result<Todo> {
-    find_todo(store, query, false)
-        .or_else(|open_err| find_todo(store, query, true).map_err(|_| open_err))
+    let q = query.to_lowercase();
+    let matches = |done: bool| {
+        store.todos().iter().any(|t| {
+            t.completed == done && (t.uid == query || t.summary.to_lowercase().contains(&q))
+        })
+    };
+    if !matches(false) && matches(true) {
+        find_todo(store, query, true)
+    } else {
+        find_todo(store, query, false)
+    }
 }

@@ -664,3 +664,74 @@ fn an_edit_is_journaled_once() {
     std::thread::sleep(std::time::Duration::from_millis(300));
     assert_eq!(posts.lock().unwrap().len(), 1);
 }
+
+#[test]
+fn an_occurrence_moved_far_can_still_be_edited() {
+    let s = start(None);
+    let id = "climb-1@2026-11-18T18:30:00+01:00";
+    // Wed to Sat: well away from the day it belongs to.
+    s.ok("edit_event", json!({"id": id, "date": "2026-11-21"}));
+    let v = s.ok(
+        "edit_event",
+        json!({"id": id, "summary": "Climbing outdoors"}),
+    );
+    assert_eq!(v["text"], "Updated this occurrence of Climbing outdoors");
+    let text = agenda_text(&s, "2026-11-21", 1);
+    assert!(text.contains("18:30-20:00 Climbing outdoors"), "{text}");
+    s.ok("delete_event", json!({"id": id}));
+    assert!(!agenda_text(&s, "2026-11-21", 1).contains("Climbing"));
+}
+
+#[test]
+fn an_unclear_todo_is_not_looked_for_among_the_done_ones() {
+    let s = start(None);
+    for t in ["Buy milk", "Milk the cow", "milk"] {
+        s.ok("add_todo", json!({"summary": t}));
+    }
+    s.ok("complete_todo", json!({"query": "milk"}));
+    // Now two open todos match, and one done one.
+    let (status, v) = s.post("delete_todo", json!({"query": "milk"}));
+    assert_eq!(status, 400, "{v}");
+    assert!(
+        v["error"].as_str().unwrap().contains("matches 2 todos"),
+        "{v}"
+    );
+    let all = s.ok("todos", json!({"all": true}));
+    assert!(all["text"].as_str().unwrap().contains("milk"), "{all}");
+    // When no open one matches, the done ones are looked at.
+    s.ok("delete_todo", json!({"query": "Buy milk"}));
+    s.ok("delete_todo", json!({"query": "Milk the cow"}));
+    let v = s.ok("delete_todo", json!({"query": "milk"}));
+    assert_eq!(v["text"], "Deleted todo: milk");
+}
+
+#[test]
+fn an_all_day_event_given_a_time_lasts_an_hour() {
+    let s = start(None);
+    let v = s.ok("edit_event", json!({"id": "trip-1", "time": "10:00"}));
+    assert!(v["text"].as_str().unwrap().ends_with("10:00-11:00"), "{v}");
+}
+
+#[test]
+fn a_failed_push_leaves_the_alert_to_the_timer() {
+    // sync_command goes before the tables.
+    let config = format!("sync_command = \"false\"\n{CONFIG}\n[jarvis]\nfail_after = 1\n");
+    let s = start_with(None, &config);
+    // The push after this edit fails: that is the first failure ...
+    s.ok("add_event", json!({"text": "Dentist fri 14:00"}));
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    // ... and the timer's sync, failing too, is the one that alerts.
+    let out = Command::new(env!("CARGO_BIN_EXE_cal-tui"))
+        .arg("--config")
+        .arg(s._dir.path().join("config.toml"))
+        .arg("--calendars-dir")
+        .arg(s.calendars.path())
+        .args(["--now", NOW, "sync"])
+        .env("XDG_STATE_HOME", s._dir.path().join("state"))
+        .env_remove("JARVIS_URL")
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(!out.status.success(), "{err}");
+    assert!(err.contains("has failed 2 times in a row"), "{err}");
+}

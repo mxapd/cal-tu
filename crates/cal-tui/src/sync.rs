@@ -389,6 +389,13 @@ pub struct Options {
     pub print: bool,
     /// Where state lives; default `Config::state_dir()`.
     pub state_dir: PathBuf,
+    /// Whether this caller raises the alert (`cal-tui sync`, the timer's).
+    /// Others (serve's push, the TUI) count failures but leave the alert to
+    /// it, so it is not used up where nobody reports it.
+    pub may_alert: bool,
+    /// Run `sync_command` on this terminal (the TUI), rather than capturing
+    /// its output for the log and the alert.
+    pub inherit_io: bool,
 }
 
 impl Options {
@@ -397,6 +404,8 @@ impl Options {
             run_command: true,
             print: false,
             state_dir: Config::state_dir(),
+            may_alert: false,
+            inherit_io: false,
         }
     }
 }
@@ -406,7 +415,12 @@ pub enum Outcome {
     /// Synced (or nothing to run), and compared.
     Synced,
     /// The sync failed; `alert` when this failure is the one to report.
-    Failed { message: String, alert: bool },
+    Failed {
+        message: String,
+        /// Failures in a row, this one included.
+        failures: u32,
+        alert: bool,
+    },
 }
 
 /// Where entries go, if anywhere.
@@ -431,7 +445,19 @@ pub fn publish(config: &Config, entry: &Entry, print: bool) {
     }
 }
 
-fn run_command(cmd: &str) -> Result<(), String> {
+fn run_command(cmd: &str, inherit_io: bool) -> Result<(), String> {
+    if inherit_io {
+        let status = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .status()
+            .map_err(|e| format!("cannot run '{cmd}': {e}"))?;
+        return if status.success() {
+            Ok(())
+        } else {
+            Err(format!("'{cmd}' failed ({status})"))
+        };
+    }
     let out = std::process::Command::new("sh")
         .arg("-c")
         .arg(cmd)
@@ -461,17 +487,21 @@ pub fn run(config: &Config, now: DateTime<Tz>, opts: &Options) -> Result<Outcome
     let mut state: SyncState = read_json(&state_path).unwrap_or_default();
 
     let result = match (&config.sync_command, opts.run_command) {
-        (Some(cmd), true) => run_command(cmd),
+        (Some(cmd), true) => run_command(cmd, opts.inherit_io),
         _ => Ok(()),
     };
     if let Err(message) = result {
         state.failures += 1;
         let fail_after = config.jarvis.as_ref().map_or(6, |j| j.fail_after());
-        let alert = state.failures >= fail_after && !state.alerted;
+        let alert = opts.may_alert && state.failures >= fail_after && !state.alerted;
         state.alerted |= alert;
         write_json(&state_path, &state)?;
         eprintln!("sync failed ({} in a row): {message}", state.failures);
-        return Ok(Outcome::Failed { message, alert });
+        return Ok(Outcome::Failed {
+            message,
+            failures: state.failures,
+            alert,
+        });
     }
     if state.alerted {
         publish(

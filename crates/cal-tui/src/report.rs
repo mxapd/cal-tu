@@ -152,15 +152,9 @@ pub fn build(store: &Store, now: DateTime<Tz>) -> Entry {
     }
 }
 
-/// The report URL: --url, else `$JARVIS_URL/report/<service>`, else the
-/// same on Jarvis's default address.
-pub fn url(explicit: Option<String>, jarvis_url: Option<String>, service: &str) -> String {
-    explicit.unwrap_or_else(|| {
-        let base = jarvis_url
-            .filter(|u| !u.is_empty())
-            .unwrap_or_else(|| DEFAULT_SERVER.into());
-        format!("{}/report/{service}", base.trim_end_matches('/'))
-    })
+/// Where `service`'s entries go on Jarvis's default address.
+pub fn default_url(service: &str) -> String {
+    format!("{DEFAULT_SERVER}/report/{service}")
 }
 
 pub fn post(url: &str, entry: &Entry) -> Result<()> {

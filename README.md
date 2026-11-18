@@ -122,7 +122,7 @@ Jarvis reports once as `#failed #critical`, and the first sync that works
 again posts `#resolved`.
 
 ```sh
-cal-tui sync --print                   # sync, print the entry instead of posting it
+cal-tui sync --print                   # sync, print the entry instead of posting it (still remembered)
 cal-tui sync --no-sync --print         # only compare with the last sync
 cal-tui report --print                 # the day at a glance, printed
 ```

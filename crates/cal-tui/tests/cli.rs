@@ -573,6 +573,22 @@ fn report_posts_to_jarvis_url() {
 }
 
 #[test]
+fn report_service_wins_over_the_jarvis_section() {
+    let (base, server) = receive_one();
+    let config = format!("{CONFIG}\n[jarvis]\nservice = \"calendar\"\n");
+    let out = run_env(
+        &fixtures(),
+        &config,
+        NOW,
+        &["report", "--service", "work"],
+        &[("JARVIS_URL", &base)],
+    );
+    assert_eq!(out.status, 0, "{}", out.stderr);
+    let request = server.join().unwrap();
+    assert!(request.starts_with("POST /report/work?"), "{request}");
+}
+
+#[test]
 fn report_to_nowhere_fails_clearly() {
     let out = run(&["report", "--url", "http://127.0.0.1:9/report/calendar"]);
     assert_ne!(out.status, 0);

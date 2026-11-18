@@ -114,7 +114,14 @@ fn run_sync(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     let mouse = app.config.mouse.unwrap_or(true);
     leave(mouse);
     println!("Running: {cmd}\n");
-    let outcome = crate::sync::run(&app.config, app.now(), &crate::sync::Options::new());
+    let outcome = crate::sync::run(
+        &app.config,
+        app.now(),
+        &crate::sync::Options {
+            inherit_io: true,
+            ..crate::sync::Options::new()
+        },
+    );
     let ok = matches!(outcome, Ok(crate::sync::Outcome::Synced));
     if !ok {
         match &outcome {

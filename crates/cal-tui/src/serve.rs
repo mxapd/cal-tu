@@ -284,6 +284,7 @@ pub fn run(config: Config, opts: Options) -> Result<()> {
         token,
         now: opts.now,
         warnings: Default::default(),
+        pushes: Default::default(),
     };
     loop {
         let req = if opts.idle.is_zero() {
@@ -299,6 +300,10 @@ pub fn run(config: Config, opts: Options) -> Result<()> {
             // Not tiny_http's Drop: it deletes the socket file, which under
             // socket activation is systemd's (and panics on an abstract one).
             std::mem::forget(server);
+            // An edit still being pushed is finished first.
+            for push in app.pushes.take() {
+                let _ = push.join();
+            }
             return Ok(());
         };
         app.handle(req);
@@ -373,6 +378,8 @@ struct App {
     now: Option<DateTime<Tz>>,
     /// How many loading problems were last reported.
     warnings: std::cell::Cell<usize>,
+    /// What runs after edits (journal, push), to wait for before exiting.
+    pushes: std::cell::RefCell<Vec<std::thread::JoinHandle<()>>>,
 }
 
 fn error(msg: impl std::fmt::Display) -> Value {
@@ -624,33 +631,41 @@ impl App {
         if self.config.sync_command.is_none() && self.config.jarvis.is_none() {
             return;
         }
-        let now = self.now();
-        let state_dir = Config::state_dir();
-        match Store::load(&self.config) {
-            Ok(store) => {
-                if let Err(e) = sync::note_edit(&store, uid, now, &state_dir) {
-                    eprintln!("sync snapshot: {e:#}");
-                }
-            }
-            Err(e) => eprintln!("sync snapshot: {e:#}"),
-        }
-        if let Some(text) = result["text"].as_str() {
-            let entry = report::Entry {
-                body: format!("{text}\n"),
-                tags: vec!["edited"],
-            };
-            sync::publish(&self.config, &entry, false);
-        }
+        // Off the request path: the sync lock may be held by a sync that
+        // is talking to a slow server. In this order, so the push's compare
+        // already knows about this edit.
         let config = self.config.clone();
-        std::thread::spawn(
-            move || match sync::run(&config, now, &sync::Options::new()) {
+        let now = self.now();
+        let uid = uid.to_string();
+        let text = result["text"].as_str().map(str::to_string);
+        let push = std::thread::spawn(move || {
+            let state_dir = Config::state_dir();
+            match Store::load(&config) {
+                Ok(store) => {
+                    if let Err(e) = sync::note_edit(&store, &uid, now, &state_dir) {
+                        eprintln!("sync snapshot: {e:#}");
+                    }
+                }
+                Err(e) => eprintln!("sync snapshot: {e:#}"),
+            }
+            if let Some(text) = text {
+                let entry = report::Entry {
+                    body: format!("{text}\n"),
+                    tags: vec!["edited"],
+                };
+                sync::publish(&config, &entry, false);
+            }
+            match sync::run(&config, now, &sync::Options::new()) {
                 Ok(sync::Outcome::Synced) => {}
                 Ok(sync::Outcome::Failed { message, .. }) => {
                     eprintln!("push after edit failed (the timer retries): {message}")
                 }
                 Err(e) => eprintln!("push after edit: {e:#}"),
-            },
-        );
+            }
+        });
+        let mut pushes = self.pushes.borrow_mut();
+        pushes.retain(|p| !p.is_finished());
+        pushes.push(push);
     }
 
     fn calendars(&self, store: &Store) -> Value {
@@ -735,6 +750,8 @@ fn edit_event(store: &Store, p: &Params, now: DateTime<Tz>) -> Result<Value> {
             Some(t) if t.eq_ignore_ascii_case("all day") => (String::new(), String::new()),
             Some(t) => match t.split_once('-') {
                 Some((a, b)) => (a.trim().to_string(), b.trim().to_string()),
+                // An all-day event given a time: the default hour, not 24.
+                None if matches!(r.start, Moment::Date(_)) => (t.to_string(), String::new()),
                 None => (t.to_string(), length_text(&r.start, &r.end, home)),
             },
             // Keep the time of day and the length.

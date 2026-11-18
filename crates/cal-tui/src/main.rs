@@ -180,7 +180,8 @@ enum Command {
     /// One at a time with the TUI's `S` and `serve`. A failed sync exits 0
     /// until it has failed jarvis.fail_after times in a row (default 6).
     Sync {
-        /// Print the entries instead of posting them.
+        /// Print the entries instead of posting them (what was seen is
+        /// still remembered, so the next sync does not report it again).
         #[arg(long)]
         print: bool,
         /// Only compare with the last sync; do not run sync_command.
@@ -345,17 +346,16 @@ fn main() -> Result<()> {
         let opts = sync::Options {
             run_command: !no_sync,
             print,
+            may_alert: true,
             ..sync::Options::new()
         };
         return match sync::run(&config, now, &opts)? {
             sync::Outcome::Failed {
                 message,
+                failures,
                 alert: true,
             } => {
-                bail!(
-                    "calendar sync has failed {} times in a row: {message}",
-                    config.jarvis.as_ref().map_or(6, |j| j.fail_after())
-                )
+                bail!("calendar sync has failed {failures} times in a row: {message}")
             }
             _ => Ok(()),
         };
@@ -478,17 +478,15 @@ fn main() -> Result<()> {
                 println!("tags: {}\n", entry.tags.join(" "));
                 print!("{}", entry.body);
             } else {
-                let jarvis = config.jarvis.clone().unwrap_or_default();
-                let service = service.unwrap_or_else(|| jarvis.service().to_string());
-                let env = std::env::var("JARVIS_URL").ok();
-                // --url, else [jarvis] (or $JARVIS_URL), else Jarvis's default address.
+                let mut jarvis = config.jarvis.clone().unwrap_or_default();
+                if let Some(service) = service {
+                    jarvis.service = Some(service);
+                }
+                // --url, else [jarvis] report_url, else $JARVIS_URL/report/<service>,
+                // else the same on Jarvis's default address.
                 let url = url
-                    .or_else(|| {
-                        (config.jarvis.is_some())
-                            .then(|| jarvis.report_url(env.clone()))
-                            .flatten()
-                    })
-                    .unwrap_or_else(|| report::url(None, env, &service));
+                    .or_else(|| jarvis.report_url(std::env::var("JARVIS_URL").ok()))
+                    .unwrap_or_else(|| report::default_url(jarvis.service()));
                 report::post(&url, &entry)?;
                 println!(
                     "Posted to {url}: {}",
