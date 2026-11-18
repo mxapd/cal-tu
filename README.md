@@ -94,19 +94,59 @@ service started with your graphical session).
 
 ## Jarvis
 
-`cal-tui report` posts the day at a glance to a [Jarvis](http://gitea.yggdrasil.com/BMSwahn/jarvis)
-journal: today's and tomorrow's events and the open todos, as markdown, tagged
-`#agenda` (and `#overdue` when a todo is late). The first line is the summary,
-e.g. `3 events today, 1 todo due.`
+cal-tui can be a [Jarvis](http://gitea.yggdrasil.com/BMSwahn/jarvis) service
+while staying a normal standalone TUI. Both use the same synced calendars:
 
-```sh
-cal-tui report --print                 # see the entry without posting it
-cal-tui report                         # POST to $JARVIS_URL/report/calendar
-cal-tui report --url http://host:8485/report/calendar --service calendar
+- **`cal-tui sync`** syncs (`sync_command`, e.g. vdirsyncer) and then posts to
+  the Jarvis journal what changed since the last sync: new, moved, changed and
+  removed events, and todos new, done or removed (`#changed`; nothing when
+  nothing changed). The TUI's `S` key syncs the same way, and syncs never run
+  side by side.
+- **`cal-tui serve`** answers Jarvis (below). Every change made through it is
+  journaled (`#edited`) and pushed to the server at once.
+- **`cal-tui report`** posts the day at a glance: today's and tomorrow's
+  events and the open todos (`#agenda`, `#overdue` when a todo is late).
+
+Where entries go is the config; without `[jarvis]` nothing is posted:
+
+```toml
+[jarvis]
+service = "calendar"                                   # default
+report_url = "http://127.0.0.1:8485/report/calendar"   # default: $JARVIS_URL/report/<service>
+fail_after = 6                                         # default
 ```
 
-Without `--url` or `$JARVIS_URL` it posts to Jarvis's default,
-`http://127.0.0.1:8485`. Run it from a timer for a morning entry.
+A sync that fails (the server unreachable) is retried quietly: only the
+`fail_after`th failure in a row makes `cal-tui sync` exit with an error, which
+Jarvis reports once as `#failed #critical`, and the first sync that works
+again posts `#resolved`.
+
+```sh
+cal-tui sync --print                   # sync, print the entry instead of posting it
+cal-tui sync --no-sync --print         # only compare with the last sync
+cal-tui report --print                 # the day at a glance, printed
+```
+
+On NixOS, `nixosModules.default` runs all of this as system units for one
+user (so Jarvis can watch them, logged in or not):
+
+```nix
+imports = [ inputs.cal-tui.nixosModules.default ];
+services.cal-tui.jarvis = { enable = true; user = "alice"; };   # syncAt, digestAt, socket, ...
+jarvis.endpoints.calendar = {
+  socket = "/run/cal-tui/api.sock";
+  socketGroup = "calendar-api";
+  units = [ "cal-tui-sync.service" "cal-tui-api.service" "cal-tui-digest.service" ];
+  timer = "cal-tui-sync.timer";
+  maxAge = "40m";
+  allow.ai = [ "today" "agenda" "next" "todos" "calendars" ];
+};
+```
+
+That is `cal-tui-sync.timer` (every 5 minutes), `cal-tui-digest.timer` (07:00)
+and `cal-tui-api.socket`, which starts `cal-tui serve` on Jarvis's first
+request. They use the user's own `~/.config/cal-tui/config.toml`, calendars
+and vdirsyncer config, so drop any sync timer of your own.
 
 ### Asking the calendar: `cal-tui serve`
 
@@ -181,8 +221,7 @@ jarvis.endpoints.calendar = {
 };
 ```
 
-To run it where Jarvis runs, use `socket = "/run/cal-tui/api.sock"` (with a
-socket unit that starts `cal-tui serve --idle 600`) instead of `url`.
+Where Jarvis runs, use the NixOS module above (a socket, no token) instead.
 
 ## Editing
 

@@ -1,0 +1,15 @@
+tags: changed
+
+2 new events, 1 event moved; 1 new todo, 1 todo done, 1 todo removed.
+
+### New
+- Fri 20 Nov 2026 14:00-15:00 Dentist · Main St *(personal)*
+- Gym: 26 occurrences added, from Tue 17 Nov 2026 07:00-08:00 *(personal)*
+
+### Moved
+- Lunch with Anna: Mon 16 Nov 2026 12:00-13:00 → Mon 16 Nov 2026 14:00-15:00 *(personal)*
+
+### Todos
+- new: Call bank (due Thu 19 Nov)
+- removed: Fix bike
+- done: Pay rent

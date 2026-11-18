@@ -49,13 +49,17 @@ fn copy(from: &Path, to: &Path) {
 }
 
 fn start(token: Option<&str>) -> Server {
+    start_with(token, CONFIG)
+}
+
+fn start_with(token: Option<&str>, config: &str) -> Server {
     let fixtures =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../cal-core/tests/fixtures/calendars");
     let calendars = tempfile::tempdir().unwrap();
     copy(&fixtures, calendars.path());
     let dir = tempfile::tempdir().unwrap();
     let cfg = dir.path().join("config.toml");
-    std::fs::write(&cfg, CONFIG).unwrap();
+    std::fs::write(&cfg, config).unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_cal-tui"));
     cmd.arg("--config")
         .arg(&cfg)
@@ -63,6 +67,9 @@ fn start(token: Option<&str>) -> Server {
         .arg(calendars.path())
         .args(["--now", NOW, "serve", "--listen", "127.0.0.1:0"])
         .env_remove("CAL_TUI_TOKEN_FILE")
+        .env_remove("JARVIS_URL")
+        // Never the real ~/.local/state.
+        .env("XDG_STATE_HOME", dir.path().join("state"))
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
     if let Some(t) = token {
@@ -561,4 +568,99 @@ fn months() {
     assert_eq!(m("next"), "2026-12");
     assert_eq!(m("-11"), "2025-12");
     assert_eq!(m("2027-02"), "2027-02");
+}
+
+/// A stand-in for Jarvis's /report: every POST's path and body.
+fn journal() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/report/calendar", listener.local_addr().unwrap());
+    let got = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let seen = got.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 4096];
+            // Headers, then Content-Length bytes of body.
+            loop {
+                let n = stream.read(&mut chunk).unwrap();
+                buf.extend_from_slice(&chunk[..n]);
+                let text = String::from_utf8_lossy(&buf).to_string();
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let len: usize = head
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|v| v.trim().parse().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if body.len() >= len || n == 0 {
+                        let path = head.lines().next().unwrap_or("").to_string();
+                        seen.lock().unwrap().push(format!("{path}\n{body}"));
+                        break;
+                    }
+                }
+                if n == 0 {
+                    break;
+                }
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .ok();
+        }
+    });
+    (url, got)
+}
+
+#[test]
+fn an_edit_is_journaled_once() {
+    let (url, posts) = journal();
+    let config = format!("{CONFIG}\n[jarvis]\nreport_url = \"{url}\"\n");
+    let s = start_with(None, &config);
+    // The first sync remembers what is there.
+    let sync = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_cal-tui"))
+            .arg("--config")
+            .arg(s._dir.path().join("config.toml"))
+            .arg("--calendars-dir")
+            .arg(s.calendars.path())
+            .args(["--now", NOW, "sync", "--no-sync"])
+            .args(args)
+            .env("XDG_STATE_HOME", s._dir.path().join("state"))
+            .env_remove("JARVIS_URL")
+            .output()
+            .unwrap()
+    };
+    assert!(sync(&[]).status.success());
+
+    let week = s.ok("panel_week", json!({}));
+    let (table, row) = event_row(&week, "Climbing", "2026-11-18");
+    run_op(&s, action(&table, "Delete"), &row, None);
+
+    // The edit is in the journal, tagged #edited ...
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let got = posts.lock().unwrap().clone();
+    assert_eq!(got.len(), 1, "{got:?}");
+    assert!(
+        got[0].starts_with("POST /report/calendar?tags=edited "),
+        "{got:?}"
+    );
+    assert!(
+        got[0].ends_with("\nDeleted this occurrence: Climbing (Wed 18 Nov 2026 18:30-20:00)\n"),
+        "{got:?}"
+    );
+    // ... and the next sync does not report it again.
+    let out = sync(&["--print"]);
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "");
+
+    // A dry run changes nothing, and posts nothing.
+    s.ok(
+        "add_event",
+        json!({"text": "Dentist fri 14:00", "dry_run": true}),
+    );
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert_eq!(posts.lock().unwrap().len(), 1);
 }

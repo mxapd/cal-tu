@@ -103,7 +103,9 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     }
 }
 
-/// Leave the TUI, run the configured sync command in the terminal, come back.
+/// Leave the TUI, sync in the terminal, come back. The sync goes through
+/// `sync::run`: one at a time with the timer and `serve`, and what changed
+/// goes to the journal when `[jarvis]` is set.
 fn run_sync(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     let Some(cmd) = app.config.sync_command.clone() else {
         app.message = Some("No sync_command set in the config".into());
@@ -112,15 +114,15 @@ fn run_sync(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     let mouse = app.config.mouse.unwrap_or(true);
     leave(mouse);
     println!("Running: {cmd}\n");
-    let status = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(&cmd)
-        .status();
-    let ok = matches!(&status, Ok(s) if s.success());
+    let outcome = crate::sync::run(&app.config, app.now(), &crate::sync::Options::new());
+    let ok = matches!(outcome, Ok(crate::sync::Outcome::Synced));
     if !ok {
-        match &status {
-            Ok(s) => println!("\nSync failed ({s})."),
-            Err(e) => println!("\nCould not run sync command: {e}"),
+        match &outcome {
+            Ok(crate::sync::Outcome::Failed { message, .. }) => {
+                println!("\nSync failed: {message}")
+            }
+            Err(e) => println!("\nCould not sync: {e:#}"),
+            Ok(crate::sync::Outcome::Synced) => {}
         }
         println!("Press Enter to return.");
         let mut line = String::new();

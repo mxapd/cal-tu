@@ -14,7 +14,7 @@ pub mod time;
 pub mod vtimezone;
 
 pub use alarms::Alarm;
-pub use config::{Config, WeatherConfig};
+pub use config::{Config, JarvisConfig, WeatherConfig};
 pub use edit::{EditError, EventEdit, NewEvent, NewTodo, Scope, TodoEdit};
 pub use store::{Calendar, Instance, Kind, Store, Todo, Warning};
 pub use time::Moment;

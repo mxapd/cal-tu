@@ -17,6 +17,8 @@
     in
     {
       homeManagerModules.default = hmModule;
+      # cal-tui as a Jarvis service: nix/nixos-module.nix.
+      nixosModules.default = import ./nix/nixos-module.nix self;
       homeModules.default = hmModule;
       # `pkgs.cal-tui` for your own nixpkgs: overlays = [ cal-tui.overlays.default ];
       overlays.default = final: _prev: {
@@ -171,6 +173,9 @@
               grep -q "^WantedBy=default.target" ${unit}
               touch $out
             '';
+
+          # The Jarvis service on a real systemd, with Radicale (KVM).
+          nixos-module = import ./nix/vm-test.nix { inherit pkgs self; };
 
           # A bad config must fail the build, naming the problem.
           hm-module-rejects-bad-config =

@@ -29,6 +29,43 @@ pub struct Config {
     /// TUI layouts; see `layout.rs`. Parsed by [`Config::layout`] so errors
     /// can name the exact key.
     pub layout: Option<toml::Value>,
+    /// Being a Jarvis service: where `sync`, `serve` and `report` write
+    /// what happened. Without it nothing is posted anywhere.
+    pub jarvis: Option<JarvisConfig>,
+}
+
+/// `[jarvis]`: the journal entries of this calendar.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct JarvisConfig {
+    /// The service the entries are filed under (default `calendar`).
+    pub service: Option<String>,
+    /// Where to POST entries; default `$JARVIS_URL/report/<service>`, and
+    /// with neither, entries are not posted.
+    pub report_url: Option<String>,
+    /// Failed syncs in a row before `cal-tui sync` exits with an error (and
+    /// Jarvis raises #failed); default 6.
+    pub fail_after: Option<u32>,
+}
+
+impl JarvisConfig {
+    pub fn service(&self) -> &str {
+        self.service.as_deref().unwrap_or("calendar")
+    }
+
+    pub fn fail_after(&self) -> u32 {
+        self.fail_after.unwrap_or(6).max(1)
+    }
+
+    /// The report URL, from the config or `jarvis_url` (`$JARVIS_URL`).
+    pub fn report_url(&self, jarvis_url: Option<String>) -> Option<String> {
+        if let Some(u) = self.report_url.clone().filter(|u| !u.trim().is_empty()) {
+            return Some(u);
+        }
+        jarvis_url
+            .filter(|u| !u.trim().is_empty())
+            .map(|base| format!("{}/report/{}", base.trim_end_matches('/'), self.service()))
+    }
 }
 
 /// `[weather]`: where to show the forecast for. Only this location is sent
@@ -156,6 +193,25 @@ impl Config {
                         "weather.units: '{u}' must be \"celsius\" or \"fahrenheit\""
                     ));
                 }
+            }
+        }
+        if let Some(j) = &self.jarvis {
+            if let Some(svc) = &j.service {
+                if svc.is_empty()
+                    || !svc
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                {
+                    problems.push(format!("jarvis.service: '{svc}': use a-z, 0-9 and -"));
+                }
+            }
+            if let Some(u) = &j.report_url {
+                if !(u.starts_with("http://") || u.starts_with("https://")) {
+                    problems.push(format!("jarvis.report_url: '{u}' is not an http(s) URL"));
+                }
+            }
+            if j.fail_after == Some(0) {
+                problems.push("jarvis.fail_after: must be at least 1".into());
             }
         }
         if let Some(d) = &self.default_calendar {

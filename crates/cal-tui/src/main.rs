@@ -5,6 +5,7 @@ mod output;
 mod panels;
 mod report;
 mod serve;
+mod sync;
 mod tui;
 mod weather;
 
@@ -141,9 +142,10 @@ enum Command {
         /// http://127.0.0.1:8485/report/<service>]
         #[arg(long)]
         url: Option<String>,
-        /// The service name the entry is filed under.
-        #[arg(long, default_value = "calendar")]
-        service: String,
+        /// The service name the entry is filed under [default: jarvis.service
+        /// in the config, or calendar]
+        #[arg(long)]
+        service: Option<String>,
         /// Print the entry instead of posting it.
         #[arg(long)]
         print: bool,
@@ -172,6 +174,18 @@ enum Command {
         /// Exit after this many seconds without a request (0: never).
         #[arg(long, default_value_t = 0)]
         idle: u64,
+    },
+    /// Sync the calendars (sync_command, e.g. vdirsyncer) and post to the
+    /// journal what changed since the last sync ([jarvis] in the config).
+    /// One at a time with the TUI's `S` and `serve`. A failed sync exits 0
+    /// until it has failed jarvis.fail_after times in a row (default 6).
+    Sync {
+        /// Print the entries instead of posting them.
+        #[arg(long)]
+        print: bool,
+        /// Only compare with the last sync; do not run sync_command.
+        #[arg(long)]
+        no_sync: bool,
     },
     /// Check the config file for mistakes and exit (non-zero if any).
     CheckConfig,
@@ -327,6 +341,26 @@ fn main() -> Result<()> {
         return serve::run(config, opts);
     }
 
+    if let Command::Sync { print, no_sync } = command {
+        let opts = sync::Options {
+            run_command: !no_sync,
+            print,
+            ..sync::Options::new()
+        };
+        return match sync::run(&config, now, &opts)? {
+            sync::Outcome::Failed {
+                message,
+                alert: true,
+            } => {
+                bail!(
+                    "calendar sync has failed {} times in a row: {message}",
+                    config.jarvis.as_ref().map_or(6, |j| j.fail_after())
+                )
+            }
+            _ => Ok(()),
+        };
+    }
+
     let mut store = Store::load(&config)?;
     let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
     let today = now.date_naive();
@@ -444,7 +478,17 @@ fn main() -> Result<()> {
                 println!("tags: {}\n", entry.tags.join(" "));
                 print!("{}", entry.body);
             } else {
-                let url = report::url(url, std::env::var("JARVIS_URL").ok(), &service);
+                let jarvis = config.jarvis.clone().unwrap_or_default();
+                let service = service.unwrap_or_else(|| jarvis.service().to_string());
+                let env = std::env::var("JARVIS_URL").ok();
+                // --url, else [jarvis] (or $JARVIS_URL), else Jarvis's default address.
+                let url = url
+                    .or_else(|| {
+                        (config.jarvis.is_some())
+                            .then(|| jarvis.report_url(env.clone()))
+                            .flatten()
+                    })
+                    .unwrap_or_else(|| report::url(None, env, &service));
                 report::post(&url, &entry)?;
                 println!(
                     "Posted to {url}: {}",
@@ -454,6 +498,7 @@ fn main() -> Result<()> {
         }
         Command::Notify { .. }
         | Command::Serve { .. }
+        | Command::Sync { .. }
         | Command::CheckConfig
         | Command::Completions { .. } => {
             unreachable!()

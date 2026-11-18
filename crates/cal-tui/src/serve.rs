@@ -31,6 +31,7 @@ use crate::ops::{self, is_user_error, user};
 use crate::output;
 use crate::panels;
 use crate::report;
+use crate::sync;
 
 pub struct Options {
     pub listen: Option<String>,
@@ -432,7 +433,12 @@ impl App {
                     Err(e) => return (400, error(e)),
                 };
                 match self.call(op.name, &params) {
-                    Ok(v) => (200, v),
+                    Ok(v) => {
+                        if op.kind == "command" {
+                            self.after_edit(&v);
+                        }
+                        (200, v)
+                    }
                     Err(e) if is_user_error(&e) => (400, error(e)),
                     Err(e) => {
                         eprintln!("{}: {e:#}", op.name);
@@ -497,13 +503,16 @@ impl App {
                     (Scope::All, true) => format!("Deleted all occurrences: {}", r.summary),
                     (Scope::All, false) => format!("Deleted: {} ({when})", r.summary),
                 };
-                Ok(json!({"deleted": p.required("id")?, "text": text}))
+                let uid = store.objects[r.obj].uid.clone();
+                Ok(json!({"deleted": p.required("id")?, "uid": uid, "text": text}))
             }
             "edit_todo" => edit_todo(&store, p, now),
             "delete_todo" => {
                 let t = ops::find_any_todo(&store, &p.required("query")?)?;
                 store.delete(t.object, Scope::All, now.with_timezone(&Utc))?;
-                Ok(json!({"deleted": t.uid, "text": format!("Deleted todo: {}", t.summary)}))
+                Ok(
+                    json!({"deleted": t.uid, "uid": t.uid, "text": format!("Deleted todo: {}", t.summary)}),
+                )
             }
             "next" => {
                 let within = p.int_in("within", 7, 1, MAX_NEXT_DAYS)?;
@@ -599,6 +608,49 @@ impl App {
             }
             _ => unreachable!("{op} is in OPERATIONS"),
         }
+    }
+
+    /// After a change made here, the Jarvis way: keep the sync snapshot in
+    /// step (so the next sync does not report it again), say in the journal
+    /// what was done, and push it to the server now rather than at the next
+    /// timer run.
+    fn after_edit(&self, result: &Value) {
+        let uid = result["uid"]
+            .as_str()
+            .or_else(|| result["added"]["uid"].as_str());
+        let Some(uid) = uid else {
+            return; // a dry run: nothing changed
+        };
+        if self.config.sync_command.is_none() && self.config.jarvis.is_none() {
+            return;
+        }
+        let now = self.now();
+        let state_dir = Config::state_dir();
+        match Store::load(&self.config) {
+            Ok(store) => {
+                if let Err(e) = sync::note_edit(&store, uid, now, &state_dir) {
+                    eprintln!("sync snapshot: {e:#}");
+                }
+            }
+            Err(e) => eprintln!("sync snapshot: {e:#}"),
+        }
+        if let Some(text) = result["text"].as_str() {
+            let entry = report::Entry {
+                body: format!("{text}\n"),
+                tags: vec!["edited"],
+            };
+            sync::publish(&self.config, &entry, false);
+        }
+        let config = self.config.clone();
+        std::thread::spawn(
+            move || match sync::run(&config, now, &sync::Options::new()) {
+                Ok(sync::Outcome::Synced) => {}
+                Ok(sync::Outcome::Failed { message, .. }) => {
+                    eprintln!("push after edit failed (the timer retries): {message}")
+                }
+                Err(e) => eprintln!("push after edit: {e:#}"),
+            },
+        );
     }
 
     fn calendars(&self, store: &Store) -> Value {
@@ -719,7 +771,8 @@ fn edit_event(store: &Store, p: &Params, now: DateTime<Tz>) -> Result<Value> {
     if let Some((s, e)) = &edit.time {
         text.push_str(&format!(": {}", output::describe_span(s, e, home)));
     }
-    Ok(json!({"updated": p.required("id")?, "text": text}))
+    let uid = store.objects[r.obj].uid.clone();
+    Ok(json!({"updated": p.required("id")?, "uid": uid, "text": text}))
 }
 
 fn edit_todo(store: &Store, p: &Params, now: DateTime<Tz>) -> Result<Value> {
@@ -774,7 +827,7 @@ fn edit_todo(store: &Store, p: &Params, now: DateTime<Tz>) -> Result<Value> {
     if !changes.is_empty() {
         text.push_str(&format!(" ({})", changes.join(", ")));
     }
-    Ok(json!({"updated": t.uid, "text": text}))
+    Ok(json!({"updated": t.uid, "uid": t.uid, "text": text}))
 }
 
 /// Items from `from` on for `days` days, and as markdown by day.
