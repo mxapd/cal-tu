@@ -22,14 +22,14 @@ fn plural(n: usize, one: &str) -> String {
     format!("{n} {one}{}", if n == 1 { "" } else { "s" })
 }
 
-fn due_text(due: &Moment, home: Tz) -> String {
+pub fn due_text(due: &Moment, home: Tz) -> String {
     match due {
         Moment::Date(d) => d.format("%a %d %b").to_string(),
         Moment::DateTime(dt) => dt.with_timezone(&home).format("%a %d %b %H:%M").to_string(),
     }
 }
 
-fn is_overdue(due: &Moment, now: DateTime<Tz>) -> bool {
+pub fn is_overdue(due: &Moment, now: DateTime<Tz>) -> bool {
     match due {
         Moment::Date(d) => *d < now.date_naive(),
         Moment::DateTime(dt) => dt.with_timezone(&now.timezone()) < now,
@@ -42,16 +42,28 @@ fn is_due_today(due: &Moment, now: DateTime<Tz>, home: Tz) -> bool {
 
 /// The events of one day, all-day ones first, as markdown list lines.
 fn day_lines(store: &Store, inst: &[Instance], day: NaiveDate) -> Vec<String> {
+    item_lines(store, inst, day, false)
+}
+
+/// The items of one day, all-day ones first, as markdown list lines; todos
+/// (marked as such) only `with_todos`.
+pub fn item_lines(
+    store: &Store,
+    inst: &[Instance],
+    day: NaiveDate,
+    with_todos: bool,
+) -> Vec<String> {
     let mut items: Vec<&Instance> = inst
         .iter()
-        .filter(|i| i.kind == Kind::Event && store.occurs_on(i, day))
+        .filter(|i| (with_todos || i.kind == Kind::Event) && store.occurs_on(i, day))
         .collect();
     items.sort_by_key(|i| (!i.all_day, i.start.instant(store.home)));
     items
         .iter()
         .map(|i| {
             let time = crate::fmt::time_range(i, day, store.home).column();
-            let mut line = format!("- {} {}", time.trim(), i.summary);
+            let todo = if i.kind == Kind::Todo { "todo: " } else { "" };
+            let mut line = format!("- {} {todo}{}", time.trim(), i.summary);
             if let Some(loc) = &i.location {
                 line.push_str(&format!(" · {loc}"));
             }
@@ -61,7 +73,7 @@ fn day_lines(store: &Store, inst: &[Instance], day: NaiveDate) -> Vec<String> {
         .collect()
 }
 
-fn todo_line(store: &Store, t: &Todo, now: DateTime<Tz>) -> String {
+pub fn todo_line(store: &Store, t: &Todo, now: DateTime<Tz>) -> String {
     let mut line = "- ".to_string();
     if t.due.is_some_and(|d| is_overdue(&d, now)) {
         line.push_str("**overdue** ");

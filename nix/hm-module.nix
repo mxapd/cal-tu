@@ -10,6 +10,11 @@
 #     };
 #   };
 #   services.cal-tui-notify.enable = true;   # reminders as desktop notifications
+#   services.cal-tui-serve = {               # the calendars for Jarvis (and its MCP)
+#     enable = true;
+#     listen = "100.64.0.5:8487";            # your tailnet address
+#     tokenFile = "/run/user/1000/secrets/cal-tui-token";
+#   };
 #
 # `settings` is written to ~/.config/cal-tui/config.toml. The generated file
 # is checked with `cal-tui check-config` at build time, so a typo or an
@@ -21,6 +26,7 @@ self:
 let
   cfg = config.programs.cal-tui;
   notifyCfg = config.services.cal-tui-notify;
+  serveCfg = config.services.cal-tui-serve;
   tomlFormat = pkgs.formats.toml { };
   inherit (lib) mkOption mkEnableOption mkIf types literalExpression;
 
@@ -86,6 +92,36 @@ in
       type = types.str;
       default = "graphical-session.target";
       description = "systemd user target the service is started with (and stopped with).";
+    };
+  };
+
+  options.services.cal-tui-serve = {
+    enable = mkEnableOption "`cal-tui serve`: the calendars over HTTP as the Jarvis Service API, for Jarvis to offer to AIs over MCP";
+
+    listen = mkOption {
+      type = types.str;
+      default = "127.0.0.1:8487";
+      example = "100.64.0.5:8487";
+      description = "TCP address to listen on. One that is not loopback needs `tokenFile`.";
+    };
+
+    tokenFile = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "/run/user/1000/secrets/cal-tui-token";
+      description = "File holding the bearer token every request must carry (Jarvis: `jarvis.endpoints.<name>.tokenFile` with the same token). A path as a string, so the secret stays out of the Nix store.";
+    };
+
+    service = mkOption {
+      type = types.str;
+      default = "calendar";
+      description = "The service name `/describe` gives; use the name of the Jarvis endpoint.";
+    };
+
+    target = mkOption {
+      type = types.str;
+      default = "default.target";
+      description = "systemd user target the service is started with.";
     };
   };
 
@@ -166,6 +202,32 @@ in
           RestartSec = 10;
         };
         Install.WantedBy = [ notifyCfg.target ];
+      };
+    })
+
+    (mkIf serveCfg.enable {
+      assertions = [{
+        assertion = cfg.enable;
+        message = "services.cal-tui-serve needs programs.cal-tui.enable = true (it uses the same config and package).";
+      }];
+
+      systemd.user.services.cal-tui-serve = {
+        Unit = {
+          Description = "cal-tui calendars for Jarvis (Service API over HTTP)";
+          PartOf = [ serveCfg.target ];
+          After = [ serveCfg.target ];
+          X-Restart-Triggers = [ config.xdg.configFile."cal-tui/config.toml".source ];
+        };
+        Service = {
+          ExecStart = lib.escapeShellArgs (
+            [ (lib.getExe cfg.package) "serve" "--listen" serveCfg.listen "--service" serveCfg.service ]
+            ++ lib.optionals (serveCfg.tokenFile != null) [ "--token-file" serveCfg.tokenFile ]
+          );
+          # A tailnet address may not be up yet at login.
+          Restart = "on-failure";
+          RestartSec = 10;
+        };
+        Install.WantedBy = [ serveCfg.target ];
       };
     })
   ];

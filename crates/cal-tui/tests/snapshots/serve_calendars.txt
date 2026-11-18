@@ -1,0 +1,17 @@
+{
+  "calendars": [
+    {
+      "default": true,
+      "id": "personal",
+      "name": "personal",
+      "read_only": false
+    },
+    {
+      "default": false,
+      "id": "uni",
+      "name": "University",
+      "read_only": true
+    }
+  ],
+  "text": "### Calendars (2)\n- personal · default\n- University (`uni`) · read-only\n"
+}

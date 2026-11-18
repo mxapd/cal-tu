@@ -1,0 +1,21 @@
+{
+  "days": 3,
+  "from": "2026-11-16",
+  "items": [
+    {
+      "all_day": false,
+      "calendar": "uni",
+      "calendar_name": "University",
+      "description": null,
+      "end": "2026-11-16T10:00:00+01:00",
+      "kind": "event",
+      "location": "Hall A",
+      "read_only": true,
+      "recurring": true,
+      "start": "2026-11-16T08:15:00+01:00",
+      "summary": "Linear Algebra, lecture",
+      "uid": "040000008200E00074C5B7101A82E008"
+    }
+  ],
+  "text": "### Mon 16 Nov 2026\n- 08:15-10:00 Linear Algebra, lecture · Hall A *(University)*\n"
+}

@@ -1,0 +1,17 @@
+{
+  "item": {
+    "all_day": false,
+    "calendar": "personal",
+    "calendar_name": "personal",
+    "description": null,
+    "end": "2026-11-16T13:00:00+01:00",
+    "kind": "event",
+    "location": "Café Lisa",
+    "read_only": false,
+    "recurring": false,
+    "start": "2026-11-16T12:00:00+01:00",
+    "summary": "Lunch with Anna",
+    "uid": "lunch-1"
+  },
+  "text": "12:00 Lunch with Anna (in 28m) *(personal)* · Café Lisa"
+}

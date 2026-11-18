@@ -1,0 +1,49 @@
+{
+  "days": 1,
+  "from": "2026-11-16",
+  "items": [
+    {
+      "all_day": false,
+      "calendar": "uni",
+      "calendar_name": "University",
+      "description": null,
+      "end": "2026-11-16T10:00:00+01:00",
+      "kind": "event",
+      "location": "Hall A",
+      "read_only": true,
+      "recurring": true,
+      "start": "2026-11-16T08:15:00+01:00",
+      "summary": "Linear Algebra, lecture",
+      "uid": "040000008200E00074C5B7101A82E008"
+    },
+    {
+      "all_day": false,
+      "calendar": "personal",
+      "calendar_name": "personal",
+      "description": null,
+      "end": "2026-11-16T13:00:00+01:00",
+      "kind": "event",
+      "location": "Café Lisa",
+      "read_only": false,
+      "recurring": false,
+      "start": "2026-11-16T12:00:00+01:00",
+      "summary": "Lunch with Anna",
+      "uid": "lunch-1"
+    },
+    {
+      "all_day": false,
+      "calendar": "personal",
+      "calendar_name": "personal",
+      "description": null,
+      "end": "2026-11-16T20:00:00+01:00",
+      "kind": "event",
+      "location": null,
+      "read_only": false,
+      "recurring": true,
+      "start": "2026-11-16T18:30:00+01:00",
+      "summary": "Climbing",
+      "uid": "climb-1"
+    }
+  ],
+  "text": "### Mon 16 Nov 2026\n- 08:15-10:00 Linear Algebra, lecture · Hall A *(University)*\n- 12:00-13:00 Lunch with Anna · Café Lisa *(personal)*\n- 18:30-20:00 Climbing *(personal)*\n"
+}

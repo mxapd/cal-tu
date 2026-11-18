@@ -1,7 +1,9 @@
 mod fmt;
 mod notify;
+mod ops;
 mod output;
 mod report;
+mod serve;
 mod tui;
 mod weather;
 
@@ -145,6 +147,31 @@ enum Command {
         #[arg(long)]
         print: bool,
     },
+    /// Answer questions about the calendars over HTTP: the Jarvis Service
+    /// API (GET /describe, POST /<operation> with JSON), so that Jarvis can
+    /// offer them to AIs as MCP tools.
+    ///
+    /// Listens on --listen or --socket; with neither, on the socket systemd
+    /// passes (socket activation).
+    #[command(verbatim_doc_comment)]
+    Serve {
+        /// TCP address, e.g. 127.0.0.1:8487 (port 0: any free port).
+        #[arg(long, conflicts_with = "socket")]
+        listen: Option<String>,
+        /// Unix socket path.
+        #[arg(long)]
+        socket: Option<PathBuf>,
+        /// File holding the bearer token every request must carry. Required
+        /// when --listen is not a loopback address.
+        #[arg(long, env = "CAL_TUI_TOKEN_FILE")]
+        token_file: Option<PathBuf>,
+        /// The service name /describe gives.
+        #[arg(long, default_value = "calendar")]
+        service: String,
+        /// Exit after this many seconds without a request (0: never).
+        #[arg(long, default_value_t = 0)]
+        idle: u64,
+    },
     /// Check the config file for mistakes and exit (non-zero if any).
     CheckConfig,
     /// Print a shell completion script: `cal-tui completions zsh`.
@@ -178,46 +205,6 @@ enum TodoAction {
         #[arg(required = true, num_args = 1..)]
         query: Vec<String>,
     },
-}
-
-/// Find exactly one todo by UID or case-insensitive title substring.
-fn find_todo(store: &Store, query: &str, completed: bool) -> Result<cal_core::Todo> {
-    let todos: Vec<_> = store
-        .todos()
-        .into_iter()
-        .filter(|t| t.completed == completed)
-        .collect();
-    if let Some(t) = todos.iter().find(|t| t.uid == query) {
-        return Ok(t.clone());
-    }
-    let q = query.to_lowercase();
-    let exact: Vec<_> = todos
-        .iter()
-        .filter(|t| t.summary.to_lowercase() == q)
-        .collect();
-    let matches: Vec<_> = if exact.len() == 1 {
-        exact
-    } else {
-        todos
-            .iter()
-            .filter(|t| t.summary.to_lowercase().contains(&q))
-            .collect()
-    };
-    match matches.as_slice() {
-        [t] => Ok((*t).clone()),
-        [] => bail!(
-            "no {} todo matches '{query}'",
-            if completed { "completed" } else { "open" }
-        ),
-        many => {
-            let list: Vec<_> = many.iter().map(|t| format!("  {}", t.summary)).collect();
-            bail!(
-                "'{query}' matches {} todos; be more specific:\n{}",
-                many.len(),
-                list.join("\n")
-            )
-        }
-    }
 }
 
 /// Parse `--now`: RFC 3339, or a local `YYYY-MM-DDTHH:MM[:SS]` in `home`.
@@ -320,6 +307,25 @@ fn main() -> Result<()> {
         return notify::run(config, cli.now.as_ref().map(|_| now), opts);
     }
 
+    if let Command::Serve {
+        listen,
+        socket,
+        token_file,
+        service,
+        idle,
+    } = command
+    {
+        let opts = serve::Options {
+            listen,
+            socket,
+            token_file,
+            service,
+            idle: std::time::Duration::from_secs(idle),
+            now: cli.now.as_ref().map(|_| now),
+        };
+        return serve::run(config, opts);
+    }
+
     let mut store = Store::load(&config)?;
     let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
     let today = now.date_naive();
@@ -340,19 +346,7 @@ fn main() -> Result<()> {
             calendars,
             json,
         } => {
-            if !calendars.is_empty() {
-                let wanted: Vec<usize> = calendars
-                    .iter()
-                    .map(|c| {
-                        store
-                            .calendar_index(c)
-                            .with_context(|| format!("unknown calendar '{c}'"))
-                    })
-                    .collect::<Result<_>>()?;
-                for (i, cal) in store.calendars.iter_mut().enumerate() {
-                    cal.hidden = !wanted.contains(&i);
-                }
-            }
+            ops::only_calendars(&mut store, &calendars)?;
             let from = from.unwrap_or(today);
             let days = days.max(1);
             let (inst, w) = store.instances(
@@ -369,11 +363,7 @@ fn main() -> Result<()> {
         } => {
             let (inst, w) = store.instances(now, now + Duration::days(within as i64));
             warnings.extend(w);
-            let next = inst
-                .iter()
-                .filter(|i| !i.all_day && i.kind == cal_core::Kind::Event)
-                .find(|i| i.start.instant(store.home) >= now);
-            if let Some(i) = next {
+            if let Some(i) = ops::next_event(&store, &inst, now) {
                 output::next(&store, i, now, &format, json)?;
             }
         }
@@ -386,29 +376,19 @@ fn main() -> Result<()> {
             repeat,
             dry_run,
         } => {
-            let q =
-                cal_core::quick::parse_event(&text.join(" "), now).map_err(anyhow::Error::msg)?;
-            let cal =
-                store.target_calendar(calendar.as_deref(), config.default_calendar.as_deref())?;
-            let reminder = remind
-                .map(|r| {
-                    cal_core::config::parse_offset(&r)
-                        .with_context(|| format!("cannot parse reminder '{r}' (use e.g. 15m, 1h)"))
-                })
-                .transpose()?;
-            let rrule = match repeat {
-                Some(r) => cal_core::quick::parse_repeat(&r).map_err(anyhow::Error::msg)?,
-                None => None,
-            };
-            let ev = cal_core::NewEvent {
-                summary: q.summary,
-                location,
-                description,
-                start: q.start,
-                end: q.end,
-                rrule,
-                reminder,
-            };
+            let (cal, ev) = ops::new_event(
+                &store,
+                &config,
+                now,
+                ops::EventInput {
+                    text: text.join(" "),
+                    calendar,
+                    remind,
+                    location,
+                    description,
+                    repeat,
+                },
+            )?;
             let line = output::describe_new_event(&store, cal, &ev);
             if dry_run {
                 println!("Would add: {line}");
@@ -426,17 +406,18 @@ fn main() -> Result<()> {
                 calendar,
                 description,
             }) => {
-                let cal = store
-                    .target_calendar(calendar.as_deref(), config.default_calendar.as_deref())?;
-                let due = due
-                    .map(|d| cal_core::quick::parse_due(&d, now).map_err(anyhow::Error::msg))
-                    .transpose()?;
-                let todo = cal_core::NewTodo {
-                    summary: text.join(" "),
-                    description,
-                    due,
-                    priority,
-                };
+                let (cal, todo) = ops::new_todo(
+                    &store,
+                    &config,
+                    now,
+                    ops::TodoInput {
+                        summary: text.join(" "),
+                        due,
+                        priority,
+                        calendar,
+                        description,
+                    },
+                )?;
                 store.create_todo(cal, &todo, now.with_timezone(&Utc))?;
                 println!(
                     "Added todo: {}",
@@ -444,13 +425,11 @@ fn main() -> Result<()> {
                 );
             }
             Some(TodoAction::Done { query }) => {
-                let t = find_todo(&store, &query.join(" "), false)?;
-                store.set_todo_completed(t.object, true, now.with_timezone(&Utc))?;
+                let t = ops::complete_todo(&store, &query.join(" "), false, now)?;
                 println!("Done: {}", t.summary);
             }
             Some(TodoAction::Undone { query }) => {
-                let t = find_todo(&store, &query.join(" "), true)?;
-                store.set_todo_completed(t.object, false, now.with_timezone(&Utc))?;
+                let t = ops::complete_todo(&store, &query.join(" "), true, now)?;
                 println!("Not done: {}", t.summary);
             }
         },
@@ -472,7 +451,10 @@ fn main() -> Result<()> {
                 );
             }
         }
-        Command::Notify { .. } | Command::CheckConfig | Command::Completions { .. } => {
+        Command::Notify { .. }
+        | Command::Serve { .. }
+        | Command::CheckConfig
+        | Command::Completions { .. } => {
             unreachable!()
         }
     }

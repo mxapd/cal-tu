@@ -108,6 +108,53 @@ cal-tui report --url http://host:8485/report/calendar --service calendar
 Without `--url` or `$JARVIS_URL` it posts to Jarvis's default,
 `http://127.0.0.1:8485`. Run it from a timer for a morning entry.
 
+### Asking the calendar: `cal-tui serve`
+
+`cal-tui serve` answers questions about the calendars over HTTP. It speaks
+Jarvis's Service API (`GET /describe`, `POST /<operation>` with JSON in and
+out), so Jarvis can be pointed at it, and Jarvis's MCP endpoint then offers its
+operations to AIs as tools (`calendar__agenda`, ...). Each answer is JSON
+(the same items as `--json`), with a markdown `text` for people and AIs.
+
+| Operation | Kind | Parameters |
+|---|---|---|
+| `today` | read | |
+| `agenda` | read | `from` (2026-11-20, tomorrow, fri, +3d), `days` (1–62), `calendars` |
+| `next` | read | `within` (days) |
+| `todos` | read | `all` |
+| `calendars` | read | |
+| `add_event` | command | `text` (as `cal-tui add`: "Dentist fri 14:00 1h"), `calendar`, `location`, `description`, `remind`, `repeat`, `dry_run` |
+| `add_todo` | command | `summary`, `due`, `priority`, `calendar`, `description` |
+| `complete_todo` | command | `query` (uid or part of the title), `undo` |
+
+```sh
+head -c 32 /dev/urandom | base64 > ~/.config/cal-tui/token
+cal-tui serve --listen 100.64.0.5:8487 --token-file ~/.config/cal-tui/token
+cal-tui serve --listen 127.0.0.1:8487                # loopback: no token needed
+cal-tui serve --socket /run/user/1000/cal-tui.sock   # a unix socket
+jarvis check http://100.64.0.5:8487 --token-file ~/.config/cal-tui/token
+```
+
+With a token, every request needs `Authorization: Bearer <token>`. An address
+that other machines can reach needs a token, or `serve` refuses to start.
+Without `--listen` or `--socket`, it uses the socket that systemd passes
+(socket activation), and `--idle 600` makes it exit after ten idle minutes. The
+calendars are read again on every request, so a sync is seen immediately.
+
+On the Jarvis host, the token goes in a secret:
+
+```nix
+jarvis.endpoints.calendar = {
+  url = "http://100.64.0.5:8487";
+  tokenFile = config.sops.secrets.cal-tui-token.path;
+  # you: everything; ai: only these. Add the commands once you trust it.
+  allow.ai = [ "today" "agenda" "next" "todos" "calendars" ];
+};
+```
+
+To run it where Jarvis runs, use `socket = "/run/cal-tui/api.sock"` (with a
+socket unit that starts `cal-tui serve --idle 600`) instead of `url`.
+
 ## Editing
 
 Edits are written atomically. If a sync changed the file since it was loaded,
@@ -153,7 +200,9 @@ programs.cal-tui = {
 };
 ```
 
-Add `services.cal-tui-notify.enable = true;` for reminders. Shell completions
+Add `services.cal-tui-notify.enable = true;` for reminders, and
+`services.cal-tui-serve = { enable = true; listen = "100.64.0.5:8487"; tokenFile = "/path/to/token"; };`
+to run `cal-tui serve` as a user service. Shell completions
 (bash, zsh, fish) come with the package. To use it as `pkgs.cal-tui` instead,
 add `inputs.cal-tui.overlays.default` to your nixpkgs overlays.
 

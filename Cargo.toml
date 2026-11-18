@@ -10,4 +10,4 @@ license = "MIT"
 [workspace.dependencies]
 cal-core = { path = "crates/cal-core" }
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }

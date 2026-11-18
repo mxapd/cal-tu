@@ -154,6 +154,24 @@
               touch $out
             '';
 
+          # The Jarvis service becomes a systemd user unit.
+          hm-serve-service =
+            let
+              unit = (hmConfig {
+                services.cal-tui-serve = {
+                  enable = true;
+                  listen = "100.64.0.5:8487";
+                  tokenFile = "/run/secrets/cal-tui-token";
+                };
+              }).xdg.configFile."systemd/user/cal-tui-serve.service".source;
+            in
+            pkgs.runCommand "cal-tui-hm-serve" { } ''
+              cat ${unit}
+              grep -q "^ExecStart=.*/bin/cal-tui serve --listen 100.64.0.5:8487 --service calendar --token-file /run/secrets/cal-tui-token\$" ${unit}
+              grep -q "^WantedBy=default.target" ${unit}
+              touch $out
+            '';
+
           # A bad config must fail the build, naming the problem.
           hm-module-rejects-bad-config =
             let

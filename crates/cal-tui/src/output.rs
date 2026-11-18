@@ -1,13 +1,13 @@
 //! Plain-text and JSON output for the shell commands.
 
 use anyhow::Result;
-use cal_core::{Instance, Kind, Moment, Store, Warning};
+use cal_core::{Instance, Kind, Moment, Store, Todo, Warning};
 use chrono::{DateTime, Duration, NaiveDate};
 use chrono_tz::Tz;
 use serde::Serialize;
 
 #[derive(Serialize)]
-struct JsonItem<'a> {
+pub struct JsonItem<'a> {
     calendar: &'a str,
     calendar_name: &'a str,
     kind: &'static str,
@@ -22,14 +22,14 @@ struct JsonItem<'a> {
     read_only: bool,
 }
 
-fn moment_json(m: &Moment, home: Tz) -> String {
+pub fn moment_json(m: &Moment, home: Tz) -> String {
     match m {
         Moment::Date(d) => d.format("%Y-%m-%d").to_string(),
         Moment::DateTime(dt) => dt.with_timezone(&home).to_rfc3339(),
     }
 }
 
-fn json_item<'a>(store: &'a Store, i: &'a Instance) -> JsonItem<'a> {
+pub fn json_item<'a>(store: &'a Store, i: &'a Instance) -> JsonItem<'a> {
     let cal = &store.calendars[i.calendar];
     JsonItem {
         calendar: &cal.id,
@@ -73,6 +73,22 @@ fn on_day(store: &Store, i: &Instance, day: NaiveDate) -> bool {
     store.occurs_on(i, day)
 }
 
+pub fn json_items<'a>(store: &'a Store, inst: &'a [Instance]) -> Vec<JsonItem<'a>> {
+    inst.iter().map(|i| json_item(store, i)).collect()
+}
+
+pub fn json_todo<'a>(store: &'a Store, t: &'a Todo) -> JsonTodo<'a> {
+    JsonTodo {
+        calendar: &store.calendars[t.calendar].id,
+        uid: &t.uid,
+        summary: &t.summary,
+        description: t.description.as_deref(),
+        priority: t.priority,
+        due: t.due.map(|d| moment_json(&d, store.home)),
+        completed: t.completed,
+    }
+}
+
 pub fn agenda(
     store: &Store,
     inst: &[Instance],
@@ -82,8 +98,10 @@ pub fn agenda(
     color: bool,
 ) -> Result<()> {
     if json {
-        let items: Vec<_> = inst.iter().map(|i| json_item(store, i)).collect();
-        println!("{}", serde_json::to_string_pretty(&items)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json_items(store, inst))?
+        );
         return Ok(());
     }
     let mut first = true;
@@ -143,24 +161,29 @@ pub fn next(
         println!("{}", serde_json::to_string_pretty(&json_item(store, i))?);
         return Ok(());
     }
+    println!("{}", next_line(store, i, now, format));
+    Ok(())
+}
+
+/// The next event on one line: `{time}`, `{summary}`, `{in}`, `{calendar}`
+/// and `{location}` in `format` filled in.
+pub fn next_line(store: &Store, i: &Instance, now: DateTime<Tz>, format: &str) -> String {
     let start = i.start.instant(store.home);
     let time = if start.date_naive() == now.date_naive() {
         start.format("%H:%M").to_string()
     } else {
         start.format("%a %H:%M").to_string()
     };
-    let out = format
+    format
         .replace("{time}", &time)
         .replace("{summary}", &i.summary)
         .replace("{in}", &crate::fmt::humanize(start - now))
         .replace("{calendar}", &store.calendars[i.calendar].name)
-        .replace("{location}", i.location.as_deref().unwrap_or(""));
-    println!("{out}");
-    Ok(())
+        .replace("{location}", i.location.as_deref().unwrap_or(""))
 }
 
 #[derive(Serialize)]
-struct JsonTodo<'a> {
+pub struct JsonTodo<'a> {
     calendar: &'a str,
     uid: &'a str,
     summary: &'a str,
@@ -177,18 +200,7 @@ pub fn todos(store: &Store, all: bool, json: bool, color: bool) -> Result<()> {
         .filter(|t| all || !t.completed)
         .collect();
     if json {
-        let items: Vec<_> = todos
-            .iter()
-            .map(|t| JsonTodo {
-                calendar: &store.calendars[t.calendar].id,
-                uid: &t.uid,
-                summary: &t.summary,
-                description: t.description.as_deref(),
-                priority: t.priority,
-                due: t.due.map(|d| moment_json(&d, store.home)),
-                completed: t.completed,
-            })
-            .collect();
+        let items: Vec<_> = todos.iter().map(|t| json_todo(store, t)).collect();
         println!("{}", serde_json::to_string_pretty(&items)?);
         return Ok(());
     }

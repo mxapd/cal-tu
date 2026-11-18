@@ -1,0 +1,169 @@
+{
+  "api": 1,
+  "operations": {
+    "add_event": {
+      "description": "Add an event from one line: title, then date, time and length, e.g. \"Dentist fri 14:00 1h\", \"Call mum 18:30-19:00\", \"Conference 12-01 3d\" (no time: all day).",
+      "kind": "command",
+      "params": {
+        "properties": {
+          "calendar": {
+            "description": "calendar id or name; default: the default calendar",
+            "type": "string"
+          },
+          "description": {
+            "description": "notes",
+            "type": "string"
+          },
+          "dry_run": {
+            "default": false,
+            "description": "only say what would be added",
+            "type": "boolean"
+          },
+          "location": {
+            "type": "string"
+          },
+          "remind": {
+            "description": "a reminder this long before the start, e.g. 15m, 1h, 1d",
+            "type": "string"
+          },
+          "repeat": {
+            "description": "daily, weekdays, weekly, biweekly, monthly, yearly, or an RRULE (FREQ=...)",
+            "type": "string"
+          },
+          "text": {
+            "description": "title then when. Dates: today, tomorrow, mon…sun, +3d, MM-DD, YYYY-MM-DD. Times: 14:00, 2pm, 14:00-15:30. Lengths: 1h, 30m, 1h30, 2d. A word starting with \\ stays in the title.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      }
+    },
+    "add_todo": {
+      "description": "Add a todo.",
+      "kind": "command",
+      "params": {
+        "properties": {
+          "calendar": {
+            "description": "calendar id or name; default: the default calendar",
+            "type": "string"
+          },
+          "description": {
+            "description": "notes",
+            "type": "string"
+          },
+          "due": {
+            "description": "due date, optionally with a time: fri, 12-24, \"tomorrow 9am\"",
+            "type": "string"
+          },
+          "priority": {
+            "default": 0,
+            "description": "1 (highest) – 9; 0 for none",
+            "type": "integer"
+          },
+          "summary": {
+            "description": "the title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "summary"
+        ],
+        "type": "object"
+      }
+    },
+    "agenda": {
+      "description": "Events and due todos, grouped by day, from a day on.",
+      "kind": "read",
+      "params": {
+        "properties": {
+          "calendars": {
+            "description": "only these calendars (folder or display name); default all",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "days": {
+            "default": 7,
+            "description": "how many days, 1–62; default 7",
+            "type": "integer"
+          },
+          "from": {
+            "description": "first day: YYYY-MM-DD, MM-DD, today, tomorrow, mon…sun (the next one) or +3d; default today",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "calendars": {
+      "description": "The calendars: id, name, whether they can be written, and which one new items go to by default.",
+      "kind": "read",
+      "params": {
+        "properties": {},
+        "type": "object"
+      }
+    },
+    "complete_todo": {
+      "description": "Mark a todo done, found by its uid or (part of) its title; with undo, mark a done one open again.",
+      "kind": "command",
+      "params": {
+        "properties": {
+          "query": {
+            "description": "the todo's uid, or (part of) its title",
+            "type": "string"
+          },
+          "undo": {
+            "default": false,
+            "description": "mark it not done instead",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    },
+    "next": {
+      "description": "The next timed event that has not started yet.",
+      "kind": "read",
+      "params": {
+        "properties": {
+          "within": {
+            "default": 7,
+            "description": "how many days ahead to look, 1–366; default 7",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "today": {
+      "description": "Today's events (and todos due today), all-day ones first.",
+      "kind": "read",
+      "params": {
+        "properties": {},
+        "type": "object"
+      }
+    },
+    "todos": {
+      "description": "Open todos, overdue ones marked, by priority and due date.",
+      "kind": "read",
+      "params": {
+        "properties": {
+          "all": {
+            "default": false,
+            "description": "include completed todos",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  "service": "calendar"
+}

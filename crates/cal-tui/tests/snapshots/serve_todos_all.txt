@@ -1,0 +1,35 @@
+{
+  "text": "### Todos (2 open)\n- Pay rent (due Wed 18 Nov) · priority 1\n- Fix bike · priority 5\n- ~~Old task~~ (done)\n",
+  "todos": [
+    {
+      "calendar": "personal",
+      "completed": false,
+      "description": null,
+      "due": "2026-11-18",
+      "overdue": false,
+      "priority": 1,
+      "summary": "Pay rent",
+      "uid": "todo-rent"
+    },
+    {
+      "calendar": "personal",
+      "completed": false,
+      "description": null,
+      "due": null,
+      "overdue": false,
+      "priority": 5,
+      "summary": "Fix bike",
+      "uid": "todo-bike"
+    },
+    {
+      "calendar": "personal",
+      "completed": true,
+      "description": null,
+      "due": null,
+      "overdue": false,
+      "priority": 1,
+      "summary": "Old task",
+      "uid": "todo-done"
+    }
+  ]
+}
