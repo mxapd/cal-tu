@@ -142,6 +142,44 @@
         "type": "object"
       }
     },
+    "panel_todos": {
+      "description": "The todos as a table: tick them off, or add one.",
+      "kind": "panel",
+      "order": 20,
+      "panel": "todos",
+      "params": {
+        "properties": {
+          "all": {
+            "default": false,
+            "description": "include completed todos",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "title": "Todos"
+    },
+    "panel_week": {
+      "description": "The week at a glance: today, the next event, the todos, and the events by day.",
+      "kind": "panel",
+      "order": 10,
+      "panel": "week",
+      "params": {
+        "properties": {
+          "days": {
+            "default": 7,
+            "description": "how many days, 1–62; default 7",
+            "type": "integer"
+          },
+          "from": {
+            "description": "first day (YYYY-MM-DD, tomorrow, mon, +3d); default today",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "title": "Week"
+    },
     "today": {
       "description": "Today's events (and todos due today), all-day ones first.",
       "kind": "read",

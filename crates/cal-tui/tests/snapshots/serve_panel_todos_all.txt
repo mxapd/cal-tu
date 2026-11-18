@@ -1,0 +1,113 @@
+{
+  "blocks": [
+    {
+      "items": [
+        {
+          "label": "Open",
+          "value": 2
+        },
+        {
+          "label": "Due today",
+          "tone": "good",
+          "value": 0
+        },
+        {
+          "label": "Overdue",
+          "tone": "good",
+          "value": 0
+        },
+        {
+          "label": "Done",
+          "value": 1
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "actions": [
+        {
+          "label": "Done",
+          "operation": "complete_todo",
+          "params": {
+            "query": "{uid}"
+          }
+        },
+        {
+          "label": "Not done",
+          "operation": "complete_todo",
+          "params": {
+            "query": "{uid}",
+            "undo": true
+          }
+        }
+      ],
+      "add": {
+        "label": "Add todo",
+        "operation": "add_todo"
+      },
+      "columns": [
+        {
+          "key": "summary",
+          "label": "Todo"
+        },
+        {
+          "key": "due",
+          "label": "Due",
+          "type": "date"
+        },
+        {
+          "key": "priority",
+          "label": "Prio",
+          "type": "number"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        },
+        {
+          "key": "calendar",
+          "label": "Calendar"
+        }
+      ],
+      "id": "todos",
+      "row_key": "uid",
+      "rows": [
+        {
+          "calendar": "personal",
+          "due": {
+            "t": "Wed 18 Nov",
+            "v": "2026-11-18"
+          },
+          "priority": 1,
+          "status": "open",
+          "summary": "Pay rent",
+          "uid": "todo-rent"
+        },
+        {
+          "calendar": "personal",
+          "due": null,
+          "priority": 5,
+          "status": "open",
+          "summary": "Fix bike",
+          "uid": "todo-bike"
+        },
+        {
+          "calendar": "personal",
+          "due": null,
+          "priority": 1,
+          "status": "done",
+          "summary": "Old task",
+          "uid": "todo-done"
+        }
+      ],
+      "type": "table"
+    }
+  ],
+  "order": 20,
+  "params": {
+    "all": true
+  },
+  "summary": "2 open",
+  "title": "Todos",
+  "updated": "2026-11-16 11:32"
+}

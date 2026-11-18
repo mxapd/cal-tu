@@ -7,6 +7,7 @@
 //!                          markdown `text` for people (and AIs).
 //!                          400 {"error"}: the caller can fix it; 404: no such
 //!                          operation; 500 {"error"}: it failed.
+//!     POST /panel_<name>   a live panel for `jarvis ls` (panels.rs)
 //!
 //! The calendars are loaded again for every request, so a sync in between is
 //! always seen. Requests are answered one at a time.
@@ -28,6 +29,7 @@ use tiny_http::{Header, Method, Request, Response, Server};
 
 use crate::ops::{self, is_user_error, user};
 use crate::output;
+use crate::panels;
 use crate::report;
 
 pub struct Options {
@@ -143,16 +145,42 @@ const OPERATIONS: &[Op] = &[
             }, "required": ["query"]})
         },
     },
+    Op {
+        name: "panel_week",
+        kind: "panel",
+        description: "The week at a glance: today, the next event, the todos, and the events by day.",
+        params: || {
+            json!({"type": "object", "properties": {
+                "from": {"type": "string", "description": "first day (YYYY-MM-DD, tomorrow, mon, +3d); default today"},
+                "days": {"type": "integer", "description": "how many days, 1–62; default 7", "default": 7}
+            }})
+        },
+    },
+    Op {
+        name: "panel_todos",
+        kind: "panel",
+        description: "The todos as a table: tick them off, or add one.",
+        params: || {
+            json!({"type": "object", "properties": {
+                "all": {"type": "boolean", "description": "include completed todos", "default": false}
+            }})
+        },
+    },
 ];
 
 fn describe(service: &str) -> Value {
     let ops: Map<String, Value> = OPERATIONS
         .iter()
         .map(|op| {
-            (
-                op.name.to_string(),
-                json!({"kind": op.kind, "description": op.description, "params": (op.params)()}),
-            )
+            let mut desc =
+                json!({"kind": op.kind, "description": op.description, "params": (op.params)()});
+            // A panel also says its tab: `panel_week` is the panel `week`.
+            if let Some((_, title, order)) = panels::PANELS.iter().find(|p| p.0 == op.name) {
+                desc["panel"] = json!(op.name.trim_start_matches("panel_"));
+                desc["title"] = json!(title);
+                desc["order"] = json!(order);
+            }
+            (op.name.to_string(), desc)
         })
         .collect();
     json!({"service": service, "api": 1, "operations": ops})
@@ -360,18 +388,17 @@ impl App {
         match op {
             "today" => Ok(agenda(&store, today, 1)),
             "agenda" => {
-                let from = match p.str("from")? {
-                    Some(s) => cal_core::quick::parse_date(s.trim(), today).ok_or_else(|| {
-                        user(format!(
-                            "from: cannot read '{s}' as a day (YYYY-MM-DD, MM-DD, today, tomorrow, mon…sun, +3d)"
-                        ))
-                    })?,
-                    None => today,
-                };
+                let from = p.day("from", today)?;
                 let days = p.int_in("days", 7, 1, MAX_AGENDA_DAYS)?;
                 ops::only_calendars(&mut store, &p.strings("calendars")?)?;
                 Ok(agenda(&store, from, days))
             }
+            "panel_week" => {
+                let from = p.day("from", today)?;
+                let days = p.int_in("days", 7, 1, MAX_AGENDA_DAYS)?;
+                Ok(panels::week(&store, from, days, now))
+            }
+            "panel_todos" => Ok(panels::todos(&store, p.bool("all")?, now)),
             "next" => {
                 let within = p.int_in("within", 7, 1, MAX_NEXT_DAYS)?;
                 let (inst, _) = store.instances(now, now + Duration::days(within));
@@ -621,6 +648,19 @@ impl Params {
             Some(Value::String(s)) if s.trim().is_empty() => Ok(None),
             Some(Value::String(s)) => Ok(Some(s.clone())),
             Some(_) => Err(user(format!("{key} should be a string"))),
+        }
+    }
+
+    /// A day: YYYY-MM-DD, MM-DD, today, tomorrow, mon…sun or +3d; `today`
+    /// when not given.
+    fn day(&self, key: &str, today: NaiveDate) -> Result<NaiveDate> {
+        match self.str(key)? {
+            Some(s) => cal_core::quick::parse_date(s.trim(), today).ok_or_else(|| {
+                user(format!(
+                    "{key}: cannot read '{s}' as a day (YYYY-MM-DD, MM-DD, today, tomorrow, mon…sun, +3d)"
+                ))
+            }),
+            None => Ok(today),
         }
     }
 

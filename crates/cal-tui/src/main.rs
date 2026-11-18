@@ -2,6 +2,7 @@ mod fmt;
 mod notify;
 mod ops;
 mod output;
+mod panels;
 mod report;
 mod serve;
 mod tui;

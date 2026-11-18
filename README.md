@@ -126,6 +126,15 @@ operations to AIs as tools (`calendar__agenda`, ...). Each answer is JSON
 | `add_event` | command | `text` (as `cal-tui add`: "Dentist fri 14:00 1h"), `calendar`, `location`, `description`, `remind`, `repeat`, `dry_run` |
 | `add_todo` | command | `summary`, `due`, `priority`, `calendar`, `description` |
 | `complete_todo` | command | `query` (uid or part of the title), `undo` |
+| `panel_week` | panel | `from`, `days` |
+| `panel_todos` | panel | `all` |
+
+The two panels are tabs of the calendar in `jarvis ls`, next to the cal-tui
+tab: **Week** (today, the next event, the todos as tiles, then the events by
+day, with "Add event") and **Todos** (a table to tick off: Done, Not done,
+"Add todo"). Their actions are the commands above, which Jarvis confirms with
+you first; `=` changes a panel's range. Panels are for you only: Jarvis never
+offers them to AIs.
 
 ```sh
 head -c 32 /dev/urandom | base64 > ~/.config/cal-tui/token

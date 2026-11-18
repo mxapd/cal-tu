@@ -142,12 +142,35 @@ fn describe_follows_the_service_api() {
     let ops = d["operations"].as_object().unwrap();
     for (name, op) in ops {
         let kind = op["kind"].as_str().unwrap();
-        assert!(["read", "command"].contains(&kind), "{name}: {kind}");
+        assert!(
+            ["read", "command", "panel"].contains(&kind),
+            "{name}: {kind}"
+        );
         assert!(!op["description"].as_str().unwrap().is_empty());
         assert_eq!(op["params"]["type"], "object", "{name}");
+        // A panel is named panel_<name>, and nothing else is.
+        assert_eq!(kind == "panel", name.starts_with("panel_"), "{name}");
         // Jarvis's check: every read without required params answers {}.
-        if kind == "read" {
-            let v = s.ok(name, json!({}));
+        let v = match kind {
+            "command" => continue,
+            _ => s.ok(name, json!({})),
+        };
+        if kind == "panel" {
+            assert_eq!(op["panel"], name.trim_start_matches("panel_"));
+            assert!(
+                op["title"].is_string() && op["order"].is_i64(),
+                "{name}: {op}"
+            );
+            // jarvis_panel.validate_panel: only these keys, a title, blocks.
+            for key in v.as_object().unwrap().keys() {
+                assert!(
+                    ["title", "order", "summary", "params", "updated", "blocks"]
+                        .contains(&key.as_str()),
+                    "{name}: {key}"
+                );
+            }
+            assert!(v["blocks"].is_array(), "{name}: {v}");
+        } else {
             assert!(v["text"].is_string(), "{name}: {v}");
         }
     }
@@ -171,6 +194,11 @@ fn reads() {
         &pretty(&s.ok("todos", json!({"all": true}))),
     );
     assert_snapshot("serve_calendars", &pretty(&s.ok("calendars", json!({}))));
+    assert_snapshot("serve_panel_week", &pretty(&s.ok("panel_week", json!({}))));
+    assert_snapshot(
+        "serve_panel_todos_all",
+        &pretty(&s.ok("panel_todos", json!({"all": true}))),
+    );
     // Relative days, as an AI would say them.
     assert_eq!(
         s.ok("agenda", json!({"from": "tomorrow", "days": 1}))["from"],
@@ -286,4 +314,26 @@ fn refuses_an_open_address_without_a_token() {
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("give --token-file"), "{err}");
+}
+
+#[test]
+fn panel_actions_reach_the_commands() {
+    let s = start(None);
+    let panel = s.ok("panel_todos", json!({}));
+    let table = &panel["blocks"][1];
+    let done = &table["actions"][0];
+    assert_eq!(done["operation"], "complete_todo");
+    // What jarvis ls sends for the row of "Pay rent": "{uid}" filled in.
+    let uid = table["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["summary"] == "Pay rent")
+        .unwrap()["uid"]
+        .clone();
+    assert_eq!(done["params"]["query"], "{uid}");
+    let v = s.ok(done["operation"].as_str().unwrap(), json!({"query": uid}));
+    assert_eq!(v["text"], "Done: Pay rent");
+    let after = s.ok("panel_todos", json!({}));
+    assert!(!after.to_string().contains("Pay rent"));
 }

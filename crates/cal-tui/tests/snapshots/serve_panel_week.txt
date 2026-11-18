@@ -1,0 +1,158 @@
+{
+  "blocks": [
+    {
+      "items": [
+        {
+          "label": "Today",
+          "value": "3 events"
+        },
+        {
+          "label": "Next",
+          "note": "in 28m",
+          "value": "12:00 Lunch with Anna"
+        },
+        {
+          "label": "Open todos",
+          "value": 2
+        },
+        {
+          "label": "Overdue",
+          "tone": "good",
+          "value": 0
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "add": {
+        "label": "Add event",
+        "operation": "add_event"
+      },
+      "columns": [
+        {
+          "key": "day",
+          "label": "Day",
+          "type": "date"
+        },
+        {
+          "key": "time",
+          "label": "Time"
+        },
+        {
+          "key": "summary",
+          "label": "Event"
+        },
+        {
+          "key": "location",
+          "label": "Where"
+        },
+        {
+          "key": "calendar",
+          "label": "Calendar"
+        }
+      ],
+      "id": "agenda",
+      "row_key": "id",
+      "rows": [
+        {
+          "calendar": "University",
+          "day": {
+            "t": "Mon 16 Nov",
+            "v": "2026-11-16"
+          },
+          "id": "040000008200E00074C5B7101A82E008|2026-11-16|2026-11-16T08:15:00+01:00",
+          "location": "Hall A",
+          "summary": "Linear Algebra, lecture",
+          "time": "08:15-10:00"
+        },
+        {
+          "calendar": "personal",
+          "day": {
+            "t": "Mon 16 Nov",
+            "v": "2026-11-16"
+          },
+          "id": "lunch-1|2026-11-16|2026-11-16T12:00:00+01:00",
+          "location": "Café Lisa",
+          "summary": "Lunch with Anna",
+          "time": "12:00-13:00"
+        },
+        {
+          "calendar": "personal",
+          "day": {
+            "t": "Mon 16 Nov",
+            "v": "2026-11-16"
+          },
+          "id": "climb-1|2026-11-16|2026-11-16T18:30:00+01:00",
+          "location": "",
+          "summary": "Climbing",
+          "time": "18:30-20:00"
+        },
+        {
+          "calendar": "personal",
+          "day": {
+            "t": "Tue 17 Nov",
+            "v": "2026-11-17"
+          },
+          "id": "float-1|2026-11-17|2026-11-17T09:00:00+01:00",
+          "location": "",
+          "summary": "Floating standup",
+          "time": "09:00-09:45"
+        },
+        {
+          "calendar": "personal",
+          "day": {
+            "t": "Wed 18 Nov",
+            "v": "2026-11-18"
+          },
+          "id": "climb-1|2026-11-18|2026-11-18T18:30:00+01:00",
+          "location": "",
+          "summary": "Climbing",
+          "time": "18:30-20:00"
+        },
+        {
+          "calendar": "personal",
+          "day": {
+            "t": "Fri 20 Nov",
+            "v": "2026-11-20"
+          },
+          "id": "trip-1|2026-11-20|2026-11-20T00:00:00+01:00",
+          "location": "",
+          "summary": "Weekend trip",
+          "time": "all day"
+        },
+        {
+          "calendar": "personal",
+          "day": {
+            "t": "Sat 21 Nov",
+            "v": "2026-11-21"
+          },
+          "id": "trip-1|2026-11-21|2026-11-20T00:00:00+01:00",
+          "location": "",
+          "summary": "Weekend trip",
+          "time": "all day"
+        },
+        {
+          "calendar": "personal",
+          "day": {
+            "t": "Sun 22 Nov",
+            "v": "2026-11-22"
+          },
+          "id": "trip-1|2026-11-22|2026-11-20T00:00:00+01:00",
+          "location": "",
+          "summary": "Weekend trip",
+          "time": "all day"
+        }
+      ],
+      "title": "Mon 16 Nov – Sun 22 Nov",
+      "type": "table"
+    }
+  ],
+  "order": 10,
+  "params": {
+    "days": 7,
+    "from": "2026-11-16"
+  },
+  "summary": "3 events today; next 12:00 Lunch with Anna",
+  "title": "Week",
+  "updated": "2026-11-16 11:32"
+}
