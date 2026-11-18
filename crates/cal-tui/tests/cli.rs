@@ -33,6 +33,10 @@ fn run_with(config: &str, args: &[&str]) -> Out {
 }
 
 fn run_in(calendars: &Path, config: &str, args: &[&str]) -> Out {
+    run_env(calendars, config, NOW, args, &[])
+}
+
+fn run_env(calendars: &Path, config: &str, now: &str, args: &[&str], env: &[(&str, &str)]) -> Out {
     let dir = tempfile::tempdir().unwrap();
     let cfg = dir.path().join("config.toml");
     std::fs::write(&cfg, config).unwrap();
@@ -42,9 +46,11 @@ fn run_in(calendars: &Path, config: &str, args: &[&str]) -> Out {
         .arg("--calendars-dir")
         .arg(calendars)
         .arg("--now")
-        .arg(NOW)
+        .arg(now)
         .args(args)
         .env("NO_COLOR", "1")
+        .env_remove("JARVIS_URL")
+        .envs(env.iter().copied())
         .output()
         .unwrap();
     Out {
@@ -460,4 +466,120 @@ fn notify_failed_delivery_is_retried() {
     let a = args("true");
     run(&a.iter().map(String::as_str).collect::<Vec<_>>());
     assert!(std::fs::read_to_string(&state).unwrap().contains("climb-1"));
+}
+
+#[test]
+fn report_prints_the_day_at_a_glance() {
+    check("cli_report", &["report", "--print"]);
+}
+
+#[test]
+fn report_overdue_todo_is_tagged() {
+    // Three days on, rent (due Wed 18 Nov) is overdue.
+    let out = run_env(
+        &fixtures(),
+        CONFIG,
+        "2026-11-19T09:00",
+        &["report", "--print"],
+        &[],
+    );
+    assert!(
+        out.stdout.starts_with("tags: agenda overdue\n"),
+        "{}",
+        out.stdout
+    );
+    assert!(out.stdout.contains("1 overdue."), "{}", out.stdout);
+    assert!(
+        out.stdout
+            .contains("- **overdue** Pay rent (due Wed 18 Nov)"),
+        "{}",
+        out.stdout
+    );
+}
+
+/// A one-request HTTP server: returns what it received.
+fn receive_one() -> (String, std::thread::JoinHandle<String>) {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let handle = std::thread::spawn(move || {
+        let (mut conn, _) = listener.accept().unwrap();
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let n = conn.read(&mut chunk).unwrap();
+            buf.extend_from_slice(&chunk[..n]);
+            let text = String::from_utf8_lossy(&buf).to_string();
+            if let Some(end) = text.find("\r\n\r\n") {
+                let len: usize = text
+                    .lines()
+                    .find_map(|l| {
+                        l.to_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|v| v.trim().parse().unwrap())
+                    })
+                    .unwrap_or(0);
+                if buf.len() >= end + 4 + len {
+                    break;
+                }
+            }
+            if n == 0 {
+                break;
+            }
+        }
+        conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .unwrap();
+        String::from_utf8(buf).unwrap()
+    });
+    (url, handle)
+}
+
+#[test]
+fn report_posts_to_jarvis_url() {
+    let (base, server) = receive_one();
+    let out = run_env(
+        &fixtures(),
+        CONFIG,
+        NOW,
+        &["report"],
+        &[("JARVIS_URL", &base)],
+    );
+    assert_eq!(out.status, 0, "{}", out.stderr);
+    assert!(
+        out.stdout.contains("calendar: 3 events today."),
+        "{}",
+        out.stdout
+    );
+    let request = server.join().unwrap();
+    assert!(
+        request.starts_with("POST /report/calendar?tags=agenda HTTP/1.1\r\n"),
+        "{request}"
+    );
+    assert!(
+        request.contains("content-type: text/markdown; charset=utf-8\r\n"),
+        "{request}"
+    );
+    let body = request.split_once("\r\n\r\n").unwrap().1;
+    assert_eq!(
+        body,
+        std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots/cli_report.txt")
+        )
+        .unwrap()
+        .split_once("\n\n")
+        .unwrap()
+        .1
+    ); // the snapshot, without its tags line
+}
+
+#[test]
+fn report_to_nowhere_fails_clearly() {
+    let out = run(&["report", "--url", "http://127.0.0.1:9/report/calendar"]);
+    assert_ne!(out.status, 0);
+    assert!(
+        out.stderr
+            .contains("cannot post the report to http://127.0.0.1:9/report/calendar"),
+        "{}",
+        out.stderr
+    );
 }

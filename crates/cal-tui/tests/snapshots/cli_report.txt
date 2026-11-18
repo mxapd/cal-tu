@@ -1,0 +1,15 @@
+tags: agenda
+
+3 events today.
+
+### Today · Mon 16 Nov
+- 08:15-10:00 Linear Algebra, lecture · Hall A *(University)*
+- 12:00-13:00 Lunch with Anna · Café Lisa *(personal)*
+- 18:30-20:00 Climbing *(personal)*
+
+### Tomorrow · Tue 17 Nov
+- 09:00-09:45 Floating standup *(personal)*
+
+### Todos (2)
+- Pay rent (due Wed 18 Nov) · priority 1
+- Fix bike · priority 5

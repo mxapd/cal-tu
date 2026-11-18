@@ -92,6 +92,22 @@ cal-tui notify --command 'notify-send "$CAL_TUI_SUMMARY" "$CAL_TUI_BODY"'
 With home-manager: `services.cal-tui-notify.enable = true;` (a systemd user
 service started with your graphical session).
 
+## Jarvis
+
+`cal-tui report` posts the day at a glance to a [Jarvis](http://gitea.yggdrasil.com/BMSwahn/jarvis)
+journal: today's and tomorrow's events and the open todos, as markdown, tagged
+`#agenda` (and `#overdue` when a todo is late). The first line is the summary,
+e.g. `3 events today, 1 todo due.`
+
+```sh
+cal-tui report --print                 # see the entry without posting it
+cal-tui report                         # POST to $JARVIS_URL/report/calendar
+cal-tui report --url http://host:8485/report/calendar --service calendar
+```
+
+Without `--url` or `$JARVIS_URL` it posts to Jarvis's default,
+`http://127.0.0.1:8485`. Run it from a timer for a morning entry.
+
 ## Editing
 
 Edits are written atomically. If a sync changed the file since it was loaded,

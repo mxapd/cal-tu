@@ -1,6 +1,7 @@
 mod fmt;
 mod notify;
 mod output;
+mod report;
 mod tui;
 mod weather;
 
@@ -128,6 +129,21 @@ enum Command {
         /// Where delivered reminders are recorded.
         #[arg(long, default_value_os_t = notify::default_state_path())]
         state: PathBuf,
+    },
+    /// Post the day at a glance to a journal such as Jarvis: today's and
+    /// tomorrow's events and the open todos, as markdown (#agenda, and
+    /// #overdue when a todo is late).
+    Report {
+        /// Where to POST it [default: $JARVIS_URL/report/<service>, or
+        /// http://127.0.0.1:8485/report/<service>]
+        #[arg(long)]
+        url: Option<String>,
+        /// The service name the entry is filed under.
+        #[arg(long, default_value = "calendar")]
+        service: String,
+        /// Print the entry instead of posting it.
+        #[arg(long)]
+        print: bool,
     },
     /// Check the config file for mistakes and exit (non-zero if any).
     CheckConfig,
@@ -438,6 +454,24 @@ fn main() -> Result<()> {
                 println!("Not done: {}", t.summary);
             }
         },
+        Command::Report {
+            url,
+            service,
+            print,
+        } => {
+            let entry = report::build(&store, now);
+            if print {
+                println!("tags: {}\n", entry.tags.join(" "));
+                print!("{}", entry.body);
+            } else {
+                let url = report::url(url, std::env::var("JARVIS_URL").ok(), &service);
+                report::post(&url, &entry)?;
+                println!(
+                    "Posted to {url}: {}",
+                    entry.body.lines().next().unwrap_or("")
+                );
+            }
+        }
         Command::Notify { .. } | Command::CheckConfig | Command::Completions { .. } => {
             unreachable!()
         }
