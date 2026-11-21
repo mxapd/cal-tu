@@ -251,6 +251,9 @@ fn main() -> Result<()> {
     }
 
     if matches!(cli.command, Some(Command::CheckConfig)) {
+        for n in config.ignored_notices() {
+            eprintln!("{}: warning: {n}", config_path.display());
+        }
         let problems = check_config(&config);
         if problems.is_empty() {
             println!("{}: ok", config_path.display());

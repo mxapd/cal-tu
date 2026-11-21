@@ -269,7 +269,11 @@ The flake exports `homeManagerModules.default` (also `homeModules.default`):
 the known keys and free-form pass-through for the rest. The generated file is
 validated with `cal-tui check-config` at build time, so a typo or invalid value
 (unknown key, time zone, colour, reminder, regex) fails the rebuild instead of
-the app. The `notify` service (milestone 4) will be added to the module as
+the app. One exception: a whole unknown top-level *section* (say `[jarvis]`
+from another branch or a newer build) is skipped with a warning from
+`check-config` and the TUI, so one config can serve several builds. Unknown
+plain top-level keys and unknown keys inside known sections are still errors.
+The `notify` service (milestone 4) will be added to the module as
 `services.cal-tui-notify`. Sync stays with home-manager's own vdirsyncer
 module (`accounts.calendar` + `services.vdirsyncer`).
 

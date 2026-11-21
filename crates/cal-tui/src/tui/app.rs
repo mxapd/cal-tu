@@ -156,7 +156,10 @@ impl App {
     /// Like `new`, with layouts saved from the TUI kept at `state_path`.
     pub fn with_layout_state(config: Config, store: Store, state_path: PathBuf) -> App {
         let today = Utc::now().with_timezone(&store.home).date_naive();
-        let mut startup_message = None;
+        let mut startup_message = config
+            .ignored_notices()
+            .first()
+            .map(|n| format!("Config: {n}"));
         // Invalid layout settings must not stop the app: fall back and say so.
         let layout_cfg = config.layout().unwrap_or_else(|e| {
             startup_message = Some(format!("Ignoring [layout] in config: {e}"));

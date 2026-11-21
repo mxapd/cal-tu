@@ -172,6 +172,23 @@ fn unknown_config_key_is_rejected() {
     );
 }
 
+#[test]
+fn unknown_config_section_is_a_warning() {
+    let cfg = "[jarvis]\nservice = \"calendar\"\n";
+    let out = run_with(cfg, &["check-config"]);
+    assert_eq!(out.status, 0, "{}", out.stderr);
+    assert!(
+        out.stderr
+            .contains("warning: ignoring unknown section [jarvis]"),
+        "{}",
+        out.stderr
+    );
+    // Other commands run normally and do not nag about it.
+    let out = run_with(cfg, &["today"]);
+    assert_eq!(out.status, 0, "{}", out.stderr);
+    assert!(!out.stderr.contains("jarvis"), "{}", out.stderr);
+}
+
 // --- commands that write --------------------------------------------------------
 
 /// A writable copy of the fixture calendars.

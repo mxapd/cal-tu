@@ -29,7 +29,24 @@ pub struct Config {
     /// TUI layouts; see `layout.rs`. Parsed by [`Config::layout`] so errors
     /// can name the exact key.
     pub layout: Option<toml::Value>,
+    /// Top-level sections this version does not know (e.g. `[jarvis]` from a
+    /// newer build or another branch). They are skipped, not errors, so one
+    /// config can serve several builds; `check-config` and the TUI say so.
+    #[serde(skip)]
+    pub ignored_sections: Vec<String>,
 }
+
+/// Top-level keys `Config` understands (keep in sync with its fields).
+const KNOWN_KEYS: [&str; 8] = [
+    "calendars_dir",
+    "default_calendar",
+    "sync_command",
+    "timezone",
+    "mouse",
+    "calendars",
+    "weather",
+    "layout",
+];
 
 /// `[weather]`: where to show the forecast for. Only this location is sent
 /// to the weather service (Open-Meteo, no account needed).
@@ -74,9 +91,7 @@ impl Config {
     /// Load from `path`; a missing file yields the defaults.
     pub fn load(path: &Path) -> Result<Config> {
         match std::fs::read_to_string(path) {
-            Ok(s) => {
-                toml::from_str(&s).with_context(|| format!("invalid config {}", path.display()))
-            }
+            Ok(s) => Self::parse(&s).with_context(|| format!("invalid config {}", path.display())),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Config::default()),
             Err(e) => Err(e).with_context(|| format!("cannot read {}", path.display())),
         }
@@ -103,9 +118,33 @@ impl Config {
         }
     }
 
-    /// Parse a config from TOML text (unknown keys are errors).
+    /// Parse a config from TOML text. Unknown keys are errors, except whole
+    /// unknown top-level sections, which are skipped (see `ignored_sections`).
     pub fn from_toml(text: &str) -> Result<Config> {
-        Ok(toml::from_str(text)?)
+        Self::parse(text)
+    }
+
+    fn parse(text: &str) -> Result<Config> {
+        let mut table: toml::Table = text.parse()?;
+        let ignored: Vec<String> = table
+            .iter()
+            .filter(|(k, v)| v.is_table() && !KNOWN_KEYS.contains(&k.as_str()))
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in &ignored {
+            table.remove(k);
+        }
+        let mut config: Config = table.try_into()?;
+        config.ignored_sections = ignored;
+        Ok(config)
+    }
+
+    /// One line per skipped section, for `check-config` and the TUI.
+    pub fn ignored_notices(&self) -> Vec<String> {
+        self.ignored_sections
+            .iter()
+            .map(|k| format!("ignoring unknown section [{k}] (not used by this version)"))
+            .collect()
     }
 
     /// Problems that parsing alone does not catch: unknown time zone, bad
@@ -244,6 +283,27 @@ mod tests {
         assert!(c.calendars_dir().ends_with("cals"));
         assert!(toml::from_str::<Config>("typo_key = 1").is_err());
         assert!(c.validate().is_empty());
+    }
+
+    #[test]
+    fn unknown_sections_are_skipped_but_typos_are_not() {
+        let c = Config::from_toml(
+            r#"
+            timezone = "Europe/Stockholm"
+            [jarvis]
+            report_url = "http://127.0.0.1:8485/report/calendar"
+            [weather]
+            location = "Uppsala"
+            "#,
+        )
+        .unwrap();
+        assert_eq!(c.ignored_sections, ["jarvis"]);
+        assert_eq!(c.weather.unwrap().location.as_deref(), Some("Uppsala"));
+        // A stray top-level key, or a typo inside a known section, still fails.
+        assert!(Config::from_toml("calendar_dir = \"x\"").is_err());
+        assert!(Config::from_toml("[weather]\nlocaton = \"x\"").is_err());
+        assert!(Config::from_toml("[calendars.uni]\ncolour = \"red\"").is_err());
+        assert!(Config::from_toml("").unwrap().ignored_sections.is_empty());
     }
 
     #[test]
