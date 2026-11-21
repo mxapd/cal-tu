@@ -6,8 +6,10 @@
 
 use anyhow::Result;
 use cal_core::quick::{parse_date, parse_length, parse_time};
+#[cfg(feature = "jarvis")]
+use cal_core::EditError;
 use cal_core::Moment;
-use cal_core::{Config, EditError, Instance, Kind, NewEvent, NewTodo, Store, Todo};
+use cal_core::{Config, Instance, Kind, NewEvent, NewTodo, Store, Todo};
 use chrono::{DateTime, Duration};
 use chrono_tz::Tz;
 
@@ -28,6 +30,7 @@ pub fn user(msg: impl Into<String>) -> anyhow::Error {
 }
 
 /// Whether the caller can fix `e` by asking differently.
+#[cfg(feature = "jarvis")]
 pub fn is_user_error(e: &anyhow::Error) -> bool {
     e.chain().any(|c| {
         c.is::<UserError>()
@@ -281,6 +284,7 @@ pub fn event_id(store: &Store, i: &Instance) -> String {
 }
 
 /// An event an [`event_id`] names, as it is now.
+#[cfg(feature = "jarvis")]
 pub struct EventRef {
     pub obj: usize,
     /// The occurrence, for one occurrence of a series.
@@ -291,6 +295,7 @@ pub struct EventRef {
     pub end: Moment,
 }
 
+#[cfg(feature = "jarvis")]
 impl EventRef {
     /// The whole series with `all`, else what was named.
     pub fn scope(&self, all: bool) -> cal_core::Scope {
@@ -302,6 +307,7 @@ impl EventRef {
 }
 
 /// A RECURRENCE-ID as [`event_id`] writes it.
+#[cfg(feature = "jarvis")]
 fn parse_rid(s: &str, home: Tz) -> Option<Moment> {
     if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
         return Some(Moment::Date(d));
@@ -313,6 +319,7 @@ fn parse_rid(s: &str, home: Tz) -> Option<Moment> {
 
 /// Find the event `id` names. UIDs may contain `@` themselves, so only a
 /// suffix that reads as a date or time is taken as the occurrence.
+#[cfg(feature = "jarvis")]
 pub fn find_event(store: &Store, id: &str) -> Result<EventRef> {
     let id = id.trim();
     let (uid, rid) = match id.rsplit_once('@') {
@@ -387,6 +394,7 @@ pub fn find_event(store: &Store, id: &str) -> Result<EventRef> {
 /// Find a todo, open ones first, then done ones.
 /// Done ones are only looked at when no open todo matches: a query that
 /// matches several open todos stays an error.
+#[cfg(feature = "jarvis")]
 pub fn find_any_todo(store: &Store, query: &str) -> Result<Todo> {
     let q = query.to_lowercase();
     let matches = |done: bool| {

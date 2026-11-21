@@ -1,9 +1,14 @@
 mod fmt;
+#[cfg(feature = "jarvis")]
+mod journal;
 mod notify;
 mod ops;
 mod output;
+#[cfg(feature = "jarvis")]
 mod panels;
+#[cfg(feature = "jarvis")]
 mod report;
+#[cfg(feature = "jarvis")]
 mod serve;
 mod sync;
 mod tui;
@@ -137,6 +142,7 @@ enum Command {
     /// Post the day at a glance to a journal such as Jarvis: today's and
     /// tomorrow's events and the open todos, as markdown (#agenda, and
     /// #overdue when a todo is late).
+    #[cfg(feature = "jarvis")]
     Report {
         /// Where to POST it [default: $JARVIS_URL/report/<service>, or
         /// http://127.0.0.1:8485/report/<service>]
@@ -156,6 +162,7 @@ enum Command {
     ///
     /// Listens on --listen or --socket; with neither, on the socket systemd
     /// passes (socket activation).
+    #[cfg(feature = "jarvis")]
     #[command(verbatim_doc_comment)]
     Serve {
         /// TCP address, e.g. 127.0.0.1:8487 (port 0: any free port).
@@ -175,16 +182,22 @@ enum Command {
         #[arg(long, default_value_t = 0)]
         idle: u64,
     },
-    /// Sync the calendars (sync_command, e.g. vdirsyncer) and post to the
-    /// journal what changed since the last sync ([jarvis] in the config).
-    /// One at a time with the TUI's `S` and `serve`. A failed sync exits 0
-    /// until it has failed jarvis.fail_after times in a row (default 6).
+    /// Sync the calendars (sync_command, e.g. vdirsyncer), one at a time
+    /// with the TUI's `S`.
+    #[cfg_attr(
+        feature = "jarvis",
+        doc = "\nWith [jarvis] in the config, post to the journal what changed since\n\
+               the last sync. A failed sync exits 0 until it has failed\n\
+               jarvis.fail_after times in a row (default 6)."
+    )]
     Sync {
         /// Print the entries instead of posting them (what was seen is
         /// still remembered, so the next sync does not report it again).
+        #[cfg(feature = "jarvis")]
         #[arg(long)]
         print: bool,
         /// Only compare with the last sync; do not run sync_command.
+        #[cfg(feature = "jarvis")]
         #[arg(long)]
         no_sync: bool,
     },
@@ -251,6 +264,32 @@ fn check_config(config: &Config) -> Vec<String> {
     problems
 }
 
+/// `cal-tui sync`'s exit: an error for the failure that is to be reported.
+fn sync_exit(outcome: sync::Outcome) -> Result<()> {
+    match outcome {
+        sync::Outcome::Failed {
+            message,
+            failures,
+            alert: true,
+        } => {
+            if failures > 1 {
+                bail!("calendar sync has failed {failures} times in a row: {message}")
+            }
+            bail!("calendar sync failed: {message}")
+        }
+        _ => Ok(()),
+    }
+}
+
+/// `[jarvis]` in a build without the feature: worth a note, not an error,
+/// so one config serves both builds.
+fn feature_notes(config: &Config) -> Vec<String> {
+    if cfg!(feature = "jarvis") || config.jarvis.is_none() {
+        return Vec::new();
+    }
+    vec!["note: [jarvis] is ignored: cal-tui was built without the jarvis feature".into()]
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     if let Some(Command::Completions { shell }) = cli.command {
@@ -271,6 +310,9 @@ fn main() -> Result<()> {
 
     if matches!(cli.command, Some(Command::CheckConfig)) {
         let problems = check_config(&config);
+        for n in feature_notes(&config) {
+            eprintln!("{}: {n}", config_path.display());
+        }
         if problems.is_empty() {
             println!("{}: ok", config_path.display());
             return Ok(());
@@ -323,6 +365,7 @@ fn main() -> Result<()> {
         return notify::run(config, cli.now.as_ref().map(|_| now), opts);
     }
 
+    #[cfg(feature = "jarvis")]
     if let Command::Serve {
         listen,
         socket,
@@ -342,6 +385,7 @@ fn main() -> Result<()> {
         return serve::run(config, opts);
     }
 
+    #[cfg(feature = "jarvis")]
     if let Command::Sync { print, no_sync } = command {
         let opts = sync::Options {
             run_command: !no_sync,
@@ -349,16 +393,15 @@ fn main() -> Result<()> {
             may_alert: true,
             ..sync::Options::new()
         };
-        return match sync::run(&config, now, &opts)? {
-            sync::Outcome::Failed {
-                message,
-                failures,
-                alert: true,
-            } => {
-                bail!("calendar sync has failed {failures} times in a row: {message}")
-            }
-            _ => Ok(()),
+        return sync_exit(sync::run(&config, now, &opts)?);
+    }
+    #[cfg(not(feature = "jarvis"))]
+    if let Command::Sync {} = command {
+        let opts = sync::Options {
+            may_alert: true,
+            ..sync::Options::new()
         };
+        return sync_exit(sync::run(&config, now, &opts)?);
     }
 
     let mut store = Store::load(&config)?;
@@ -468,6 +511,7 @@ fn main() -> Result<()> {
                 println!("Not done: {}", t.summary);
             }
         },
+        #[cfg(feature = "jarvis")]
         Command::Report {
             url,
             service,
@@ -494,13 +538,8 @@ fn main() -> Result<()> {
                 );
             }
         }
-        Command::Notify { .. }
-        | Command::Serve { .. }
-        | Command::Sync { .. }
-        | Command::CheckConfig
-        | Command::Completions { .. } => {
-            unreachable!()
-        }
+        // Notify, Serve, Sync, CheckConfig and Completions returned above.
+        _ => unreachable!(),
     }
 
     output::report_warnings(&warnings, cli.verbose);

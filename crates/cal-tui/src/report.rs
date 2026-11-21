@@ -159,6 +159,8 @@ pub fn default_url(service: &str) -> String {
 
 pub fn post(url: &str, entry: &Entry) -> Result<()> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
+        // A Jarvis that is down should not hold up a sync for long.
+        .timeout_connect(Some(StdDuration::from_secs(3)))
         .timeout_global(Some(StdDuration::from_secs(15)))
         .build()
         .into();

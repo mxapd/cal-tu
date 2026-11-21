@@ -1,6 +1,8 @@
 //! `cal-tui serve`: the real binary on a free port, against a writable copy of
 //! the fixture calendars at a fixed time, asked over HTTP as Jarvis asks it.
 
+#![cfg(feature = "jarvis")]
+
 #[path = "support/snapshot.rs"]
 mod snapshot;
 

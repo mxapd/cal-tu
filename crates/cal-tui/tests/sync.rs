@@ -1,12 +1,14 @@
 //! `cal-tui sync`: the real binary on a writable copy of the fixtures, with
 //! its own state dir, printing the journal entries instead of posting them.
 
+#[cfg(feature = "jarvis")]
 #[path = "support/snapshot.rs"]
 mod snapshot;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output};
 
+#[cfg(feature = "jarvis")]
 use snapshot::assert_snapshot;
 
 const NOW: &str = "2026-11-16T11:32";
@@ -72,6 +74,7 @@ impl Env {
     }
 
     /// `sync --print`: (exit code, the entries printed).
+    #[cfg(feature = "jarvis")]
     fn sync(&self, now: &str) -> (i32, String) {
         let out = self.run_at(now, &["sync", "--print"]);
         (
@@ -89,12 +92,14 @@ impl Env {
         );
     }
 
-    fn file(&self, cal: &str, name: &str) -> PathBuf {
+    #[cfg(feature = "jarvis")]
+    fn file(&self, cal: &str, name: &str) -> std::path::PathBuf {
         self.calendars.path().join(cal).join(name)
     }
 }
 
 #[test]
+#[cfg(feature = "jarvis")]
 fn reports_what_changed_since_the_last_sync() {
     let e = setup("true", "");
     // The first sync only remembers what is there.
@@ -124,6 +129,7 @@ fn reports_what_changed_since_the_last_sync() {
 }
 
 #[test]
+#[cfg(feature = "jarvis")]
 fn the_window_rolling_on_is_not_news() {
     let e = setup("true", "");
     e.sync(NOW);
@@ -133,6 +139,7 @@ fn the_window_rolling_on_is_not_news() {
 }
 
 #[test]
+#[cfg(feature = "jarvis")]
 fn failures_alert_once_and_recovery_is_reported() {
     let e = setup(
         "echo error: cannot reach the server >&2; echo Use -vdebug for more >&2; false",
@@ -174,8 +181,8 @@ fn syncs_take_turns() {
     // Two syncs at once (the timer and the TUI's S, say) must not run the
     // sync command side by side.
     let e = setup("echo start >> log; sleep 0.4; echo end >> log", "");
-    let a = e.cmd(NOW, &["sync", "--print"]).spawn().unwrap();
-    let b = e.cmd(NOW, &["sync", "--print"]).spawn().unwrap();
+    let a = e.cmd(NOW, &["sync"]).spawn().unwrap();
+    let b = e.cmd(NOW, &["sync"]).spawn().unwrap();
     for mut c in [a, b] {
         assert!(c.wait().unwrap().success());
     }
@@ -202,4 +209,30 @@ fn no_jarvis_section_means_no_journal() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(!String::from_utf8_lossy(&out.stderr).contains("journal"));
+    // Nothing to compare with, so nothing is remembered either.
+    assert!(!e.dir.path().join("state/cal-tui/seen.json").exists());
+}
+
+#[test]
+#[cfg(not(feature = "jarvis"))]
+fn without_jarvis_a_failed_sync_fails_at_once() {
+    // Nothing watches for alerts, so there is no quiet retry.
+    let e = setup("echo error: offline >&2; false", "");
+    let out = e.run_at(NOW, &["sync"]);
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("calendar sync failed:"), "{err}");
+    assert!(err.contains("echo error: offline"), "{err}");
+}
+
+#[test]
+#[cfg(feature = "jarvis")]
+fn a_journal_that_cannot_be_written_does_not_fail_the_sync() {
+    let e = setup("true", "");
+    // seen.json cannot be replaced: it is a directory.
+    std::fs::create_dir_all(e.dir.path().join("state/cal-tui/seen.json/x")).unwrap();
+    let out = e.run_at(NOW, &["sync", "--print"]);
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{err}");
+    assert!(err.contains("journal: cannot write"), "{err}");
 }

@@ -469,11 +469,13 @@ fn notify_failed_delivery_is_retried() {
 }
 
 #[test]
+#[cfg(feature = "jarvis")]
 fn report_prints_the_day_at_a_glance() {
     check("cli_report", &["report", "--print"]);
 }
 
 #[test]
+#[cfg(feature = "jarvis")]
 fn report_overdue_todo_is_tagged() {
     // Three days on, rent (due Wed 18 Nov) is overdue.
     let out = run_env(
@@ -498,6 +500,7 @@ fn report_overdue_todo_is_tagged() {
 }
 
 /// A one-request HTTP server: returns what it received.
+#[cfg(feature = "jarvis")]
 fn receive_one() -> (String, std::thread::JoinHandle<String>) {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -535,6 +538,7 @@ fn receive_one() -> (String, std::thread::JoinHandle<String>) {
 }
 
 #[test]
+#[cfg(feature = "jarvis")]
 fn report_posts_to_jarvis_url() {
     let (base, server) = receive_one();
     let out = run_env(
@@ -573,6 +577,7 @@ fn report_posts_to_jarvis_url() {
 }
 
 #[test]
+#[cfg(feature = "jarvis")]
 fn report_service_wins_over_the_jarvis_section() {
     let (base, server) = receive_one();
     let config = format!("{CONFIG}\n[jarvis]\nservice = \"calendar\"\n");
@@ -589,6 +594,7 @@ fn report_service_wins_over_the_jarvis_section() {
 }
 
 #[test]
+#[cfg(feature = "jarvis")]
 fn report_to_nowhere_fails_clearly() {
     let out = run(&["report", "--url", "http://127.0.0.1:9/report/calendar"]);
     assert_ne!(out.status, 0);

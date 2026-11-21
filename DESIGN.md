@@ -51,7 +51,21 @@ iCalendar files (vdir) and synced to CalDAV through vdirsyncer.
 | Crate | Responsibility |
 |---|---|
 | `cal-core` | Read and write vdirs; parse and serialise iCal; expand recurrences; run queries over date ranges; edit (whole series or one occurrence); read config. No UI code. |
-| `cal-tui` (bin) | Subcommands: none (starts the TUI), `today`, `agenda`, `next`, `add`, `todo`, `notify`. |
+| `cal-tui` (bin) | Subcommands: none (starts the TUI), `today`, `agenda`, `next`, `add`, `todo`, `notify`, `sync`, `check-config`, `completions`; with the `jarvis` feature also `serve` and `report`. |
+
+### Jarvis: an optional layer
+
+The TUI and shell commands stand alone. Jarvis integration is the `jarvis`
+Cargo feature (on by default, and needed by the NixOS module). It adds
+`serve.rs` + `panels.rs` (the Service API), `report.rs` (the morning digest)
+and `journal.rs` (after a sync: compare with the last one and post what
+changed; count failures so an outage alerts once). It builds on the shared
+modules (`sync`, `ops`, `output`, `fmt`), and nothing shared depends on it.
+`sync.rs` is the only point where the two meet: it takes the lock, runs
+`sync_command`, then hands over to `journal::after_sync` when the feature is
+built. Without a `[jarvis]` section, the journal does not compare or remember
+anything, and journal errors never fail a sync. `nix flake check` builds and
+tests both variants (`checks.standalone`).
 
 Expected libraries: `icalendar` (or a lenient parser of our own if feeds need
 it), `rrule`, `chrono` + `chrono-tz`, `ratatui` + `crossterm`, `clap`,

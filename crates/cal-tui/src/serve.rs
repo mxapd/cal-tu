@@ -31,7 +31,7 @@ use crate::ops::{self, is_user_error, user};
 use crate::output;
 use crate::panels;
 use crate::report;
-use crate::sync;
+use crate::{journal, sync};
 
 pub struct Options {
     pub listen: Option<String>,
@@ -642,7 +642,7 @@ impl App {
             let state_dir = Config::state_dir();
             match Store::load(&config) {
                 Ok(store) => {
-                    if let Err(e) = sync::note_edit(&store, &uid, now, &state_dir) {
+                    if let Err(e) = journal::note_edit(&store, &uid, now, &state_dir) {
                         eprintln!("sync snapshot: {e:#}");
                     }
                 }
@@ -653,7 +653,7 @@ impl App {
                     body: format!("{text}\n"),
                     tags: vec!["edited"],
                 };
-                sync::publish(&config, &entry, false);
+                journal::publish(&config, &entry, false);
             }
             match sync::run(&config, now, &sync::Options::new()) {
                 Ok(sync::Outcome::Synced) => {}

@@ -90,10 +90,22 @@
           clippy = cal-tui.overrideAttrs (old: {
             pname = "cal-tui-clippy";
             nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.clippy ];
-            buildPhase = "cargo clippy --workspace --all-targets --offline -- -D warnings";
+            # Both builds: with Jarvis (the default) and the standalone one.
+            buildPhase = ''
+              cargo clippy --workspace --all-targets --offline -- -D warnings
+              cargo clippy --workspace --all-targets --offline --no-default-features -- -D warnings
+            '';
             doCheck = false;
             installPhase = "touch $out";
           });
+
+          # The TUI and shell commands on their own: built and tested without
+          # the jarvis feature (no serve, report or journal).
+          standalone = cal-tui.overrideAttrs {
+            pname = "cal-tui-standalone";
+            cargoBuildNoDefaultFeatures = true;
+            cargoCheckNoDefaultFeatures = true;
+          };
 
           fmt = pkgs.runCommand "cal-tui-fmt" { nativeBuildInputs = [ pkgs.rustfmt ]; } ''
             find ${./crates} -name '*.rs' -print0 | xargs -0 rustfmt --check --edition 2021

@@ -8,6 +8,10 @@ layouts, shell commands, reminders, Nix packaging). Next: styling, and testing
 against real calendars. See [DESIGN.md](DESIGN.md)
 for the plan.
 
+The TUI and the shell commands need nothing but the calendar files.
+Integration with [Jarvis](#optional-jarvis) is an optional extra, at the end
+of this page.
+
 ## Usage
 
 ```sh
@@ -92,10 +96,71 @@ cal-tui notify --command 'notify-send "$CAL_TUI_SUMMARY" "$CAL_TUI_BODY"'
 With home-manager: `services.cal-tui-notify.enable = true;` (a systemd user
 service started with your graphical session).
 
-## Jarvis
+## Editing
 
-cal-tui can be a [Jarvis](http://gitea.yggdrasil.com/BMSwahn/jarvis) service
-while staying a normal standalone TUI. Both use the same synced calendars:
+Edits are written atomically. If a sync changed the file since it was loaded,
+the edit is refused and the calendars are reloaded instead of overwriting the
+other change. Calendars marked `read_only` can never be changed.
+
+Calendars are read from `~/.local/share/calendars/<calendar>/*.ics` (one folder
+per calendar, as written by vdirsyncer). Optional config in
+`~/.config/cal-tui/config.toml`:
+
+```toml
+timezone = "Europe/Stockholm"        # default: system zone
+
+[calendars.uni]
+color = "cyan"                       # default: vdir `color` file
+read_only = true
+hide_matching = ["^Tutorial group B"]
+```
+
+Check a config without starting the app: `cal-tui check-config`.
+
+## Nix / home-manager
+
+```nix
+# flake inputs
+cal-tui.url = "path:/home/xam/Projects/cal-tui";   # or a git URL later
+cal-tui.inputs.nixpkgs.follows = "nixpkgs";
+
+# home-manager configuration
+imports = [ inputs.cal-tui.homeManagerModules.default ];
+programs.cal-tui = {
+  enable = true;
+  settings = {
+    timezone = "Europe/Stockholm";
+    default_calendar = "personal";
+    sync_command = "vdirsyncer sync";
+    calendars.uni = {
+      color = "cyan";
+      read_only = true;
+      hide_matching = [ "^Tutorial group B" ];
+    };
+  };
+};
+```
+
+Add `services.cal-tui-notify.enable = true;` for reminders (and, for Jarvis,
+`services.cal-tui-serve`; see below). Shell completions
+(bash, zsh, fish) come with the package. To use it as `pkgs.cal-tui` instead,
+add `inputs.cal-tui.overlays.default` to your nixpkgs overlays.
+
+This installs `cal-tui` and writes `~/.config/cal-tui/config.toml`. The file is
+checked with `cal-tui check-config` during the build, so mistakes fail the
+rebuild with a message naming the bad key.
+
+## Optional: Jarvis
+
+cal-tui can also be a [Jarvis](http://gitea.yggdrasil.com/BMSwahn/jarvis)
+service. Nothing here is needed for the TUI. Without a `[jarvis]` section,
+`S` and `cal-tui sync` only run `sync_command`: nothing is compared,
+remembered or posted. The integration is the `jarvis` Cargo feature, on by
+default; `cargo build --no-default-features` leaves out `serve`, `report` and
+the journal entirely. A config with `[jarvis]` still works in such a build;
+`check-config` notes that the section is ignored.
+
+The TUI and the Jarvis service use the same synced calendars:
 
 - **`cal-tui sync`** syncs (`sync_command`, e.g. vdirsyncer) and then posts to
   the Jarvis journal what changed since the last sync: new, moved, changed and
@@ -222,69 +287,17 @@ jarvis.endpoints.calendar = {
 ```
 
 Where Jarvis runs, use the NixOS module above (a socket, no token) instead.
-
-## Editing
-
-Edits are written atomically. If a sync changed the file since it was loaded,
-the edit is refused and the calendars are reloaded instead of overwriting the
-other change. Calendars marked `read_only` can never be changed.
-
-Calendars are read from `~/.local/share/calendars/<calendar>/*.ics` (one folder
-per calendar, as written by vdirsyncer). Optional config in
-`~/.config/cal-tui/config.toml`:
-
-```toml
-timezone = "Europe/Stockholm"        # default: system zone
-
-[calendars.uni]
-color = "cyan"                       # default: vdir `color` file
-read_only = true
-hide_matching = ["^Tutorial group B"]
-```
-
-Check a config without starting the app: `cal-tui check-config`.
-
-## Nix / home-manager
-
-```nix
-# flake inputs
-cal-tui.url = "path:/home/xam/Projects/cal-tui";   # or a git URL later
-cal-tui.inputs.nixpkgs.follows = "nixpkgs";
-
-# home-manager configuration
-imports = [ inputs.cal-tui.homeManagerModules.default ];
-programs.cal-tui = {
-  enable = true;
-  settings = {
-    timezone = "Europe/Stockholm";
-    default_calendar = "personal";
-    sync_command = "vdirsyncer sync";
-    calendars.uni = {
-      color = "cyan";
-      read_only = true;
-      hide_matching = [ "^Tutorial group B" ];
-    };
-  };
-};
-```
-
-Add `services.cal-tui-notify.enable = true;` for reminders, and
-`services.cal-tui-serve = { enable = true; listen = "100.64.0.5:8487"; tokenFile = "/path/to/token"; };`
-to run `cal-tui serve` as a user service. Shell completions
-(bash, zsh, fish) come with the package. To use it as `pkgs.cal-tui` instead,
-add `inputs.cal-tui.overlays.default` to your nixpkgs overlays.
-
-This installs `cal-tui` and writes `~/.config/cal-tui/config.toml`. The file is
-checked with `cal-tui check-config` during the build, so mistakes fail the
-rebuild with a message naming the bad key.
+Elsewhere, home-manager can run it as a user service:
+`services.cal-tui-serve = { enable = true; listen = "100.64.0.5:8487"; tokenFile = "/path/to/token"; };`.
 
 ## Development
 
 ```sh
 nix develop
 cargo test                       # all tests
+cargo test --no-default-features # the standalone build (no Jarvis)
 UPDATE_SNAPSHOTS=1 cargo test    # accept intended output changes, then git diff
-nix flake check                  # tests, clippy, rustfmt, home-manager module
+nix flake check                  # tests (both builds), clippy, rustfmt, modules
 git config core.hooksPath .githooks   # optional: run checks before each commit
 ```
 

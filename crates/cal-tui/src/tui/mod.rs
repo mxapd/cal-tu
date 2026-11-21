@@ -104,8 +104,8 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
 }
 
 /// Leave the TUI, sync in the terminal, come back. The sync goes through
-/// `sync::run`: one at a time with the timer and `serve`, and what changed
-/// goes to the journal when `[jarvis]` is set.
+/// `sync::run`: one at a time with the timer and `serve`. With the `jarvis`
+/// feature and `[jarvis]` set, what changed then goes to the journal.
 fn run_sync(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     let Some(cmd) = app.config.sync_command.clone() else {
         app.message = Some("No sync_command set in the config".into());
