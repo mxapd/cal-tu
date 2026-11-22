@@ -60,6 +60,57 @@ children = [
 ]
 ```
 
+## Keys
+
+Every key can be rebound in the config (or in Nix via
+`programs.cal-tui.settings.keys`). Setting an action replaces its default keys;
+actions you leave out keep theirs. Help (`?`) and the hint bar show what is
+actually bound.
+
+```toml
+[keys]                          # main view
+next_day = ["n", "Right"]       # a list, or a single key
+prev_day = ["b", "Left"]
+sync = []                       # unbind
+
+[keys.layout]                   # layout mode
+save = "ctrl+s"
+
+[keys.popup]                    # pop-ups
+close = ["Esc", "q"]
+
+[keys.form]                     # add/edit form and the go-to-date prompt
+save = ["Enter", "ctrl+s"]
+```
+
+Key syntax: a character (`a`, `A`, `+`, `[`), or a name: `Enter`, `Esc`,
+`Tab`, `Space`, `Backspace`, `Delete`, `Insert`, `Left`/`Right`/`Up`/`Down`,
+`Home`/`End`, `PageUp`/`PageDown`, `F1`–`F24`, with optional `ctrl+`, `alt+`,
+`shift+` in front (`shift+Tab`, `ctrl+s`). Uppercase letters need no
+`shift+`. `Ctrl-C` always quits and cannot be rebound.
+
+Actions (defaults in the help pop-up):
+
+- `[keys]`: `quit`, `help`, `next_panel`, `prev_panel`, `prev_day`,
+  `next_day`, `prev_week`, `next_week`, `prev_month`, `next_month`,
+  `scroll_down`, `scroll_up`, `down`, `up`, `today`, `goto`, `details`, `add`,
+  `edit`, `delete`, `toggle_done`, `priority_up`, `priority_down`,
+  `toggle_week_view`, `calendars`, `toggle_completed`, `sync`, `reload`,
+  `warnings`, `layout_mode`
+- `[keys.layout]`: `done`, `next_panel`, `prev_panel`, `next_preset`,
+  `prev_preset`, `grow`, `shrink`, `grow_column`, `shrink_column`, `swap`,
+  `rotate`, `hide`, `unhide`, `save`
+- `[keys.popup]`: `close`, `accept` (closes help, details, warnings), `down`,
+  `up`, `toggle` (calendar list), `yes`, `no`, `this_occurrence`,
+  `all_occurrences`
+- `[keys.form]`: `save`, `cancel`, `next_field`, `prev_field`, `clear`,
+  `line_start`, `line_end`, `next_calendar`, `prev_calendar`
+
+Typing into a text field is never affected by `[keys]`, except that a key you
+bind to a form action no longer types. `check-config` reports unknown actions,
+keys it cannot parse, and two actions sharing a key where both apply; the TUI
+falls back to the default keys if `[keys]` is invalid.
+
 ## Weather
 
 Optional: the forecast next to the date in the appointments panel (today with

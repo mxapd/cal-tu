@@ -29,6 +29,8 @@ pub struct Config {
     /// TUI layouts; see `layout.rs`. Parsed by [`Config::layout`] so errors
     /// can name the exact key.
     pub layout: Option<toml::Value>,
+    /// TUI key bindings; see `keys.rs`. Parsed by [`Config::keymap`].
+    pub keys: Option<toml::Value>,
     /// Top-level sections this version does not know (e.g. `[jarvis]` from a
     /// newer build or another branch). They are skipped, not errors, so one
     /// config can serve several builds; `check-config` and the TUI say so.
@@ -37,7 +39,7 @@ pub struct Config {
 }
 
 /// Top-level keys `Config` understands (keep in sync with its fields).
-const KNOWN_KEYS: [&str; 8] = [
+const KNOWN_KEYS: [&str; 9] = [
     "calendars_dir",
     "default_calendar",
     "sync_command",
@@ -46,6 +48,7 @@ const KNOWN_KEYS: [&str; 8] = [
     "calendars",
     "weather",
     "layout",
+    "keys",
 ];
 
 /// `[weather]`: where to show the forecast for. Only this location is sent
@@ -118,6 +121,14 @@ impl Config {
         }
     }
 
+    /// Key bindings: the defaults with `[keys]` applied.
+    pub fn keymap(&self) -> std::result::Result<crate::keys::Keymap, String> {
+        match &self.keys {
+            Some(v) => crate::keys::Keymap::from_toml(v),
+            None => Ok(Default::default()),
+        }
+    }
+
     /// Parse a config from TOML text. Unknown keys are errors, except whole
     /// unknown top-level sections, which are skipped (see `ignored_sections`).
     pub fn from_toml(text: &str) -> Result<Config> {
@@ -154,6 +165,10 @@ impl Config {
         let mut problems = Vec::new();
         if let Err(e) = self.layout() {
             problems.push(e);
+        }
+        match self.keymap() {
+            Ok(k) => problems.extend(k.conflicts()),
+            Err(e) => problems.push(e),
         }
         if let Some(z) = &self.timezone {
             if crate::time::resolve_tzid(z).is_none() {

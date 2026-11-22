@@ -213,6 +213,13 @@ state file; the TUI says so when you try to save over a config-defined layout.
 | `w` | layout mode (cycle presets, resize, swap, rotate, hide, save) |
 | `?` / `q` | help / quit |
 
+All of these are defaults: every action is rebindable in `[keys]` (main view),
+`[keys.layout]`, `[keys.popup]` and `[keys.form]` (see README). The action
+table, key parsing and conflict checks live in `cal-core::keys`, without a
+terminal library, so `check-config` validates them; the TUI maps crossterm
+events onto `KeyChord`s and asks the `Keymap` which action fired. Help and
+the hint bar are built from the keymap. `Ctrl-C` is always quit.
+
 ## CLI
 
 ```

@@ -1,5 +1,6 @@
 //! Drawing the TUI.
 
+use cal_core::keys::{Action as K, Keymap};
 use cal_core::{Instance, Kind, Moment};
 use chrono::{Datelike, Duration, NaiveDate};
 use ratatui::buffer::Buffer;
@@ -70,7 +71,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         );
     }
     match app.popup.clone() {
-        Some(Popup::Help) => draw_help(f),
+        Some(Popup::Help) => draw_help(f, &app.keymap),
         Some(Popup::Details) => draw_details(f, app),
         Some(Popup::Calendars { sel }) => draw_calendars(f, app, sel),
         Some(Popup::Goto { input, error }) => draw_goto(f, &input, error.as_deref()),
@@ -1446,69 +1447,106 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(Line::from(spans)).style(bar), area);
 }
 
+/// One hint in the key bar: which keys to show for it.
+#[derive(Clone, Copy)]
+enum Hint {
+    /// The action's first key.
+    First(K),
+    /// All of the action's keys, `Tab/↓`.
+    All(K),
+    /// First keys of two opposite actions, `h/l`.
+    Pair(K, K),
+}
+
+fn hint_keys(km: &Keymap, h: Hint) -> String {
+    let first = |a| km.keys(a).first().map(|k| k.to_string());
+    let parts: Vec<String> = match h {
+        Hint::First(a) => first(a).into_iter().collect(),
+        Hint::All(a) => km.keys(a).iter().map(|k| k.to_string()).collect(),
+        Hint::Pair(a, b) => first(a).into_iter().chain(first(b)).collect(),
+    };
+    parts.join("/")
+}
+
 fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
+    use Hint::{All, First, Pair};
     if let Some(msg) = &app.message {
         f.render_widget(Paragraph::new(format!(" {msg}")).yellow(), area);
         return;
     }
-    let hints: &[(&str, &str)] = match &app.popup {
+    let hints: &[(Hint, &str)] = match &app.popup {
         None if app.layout_mode => &[
-            ("←/→", "Preset"),
-            ("Tab", "Panel"),
-            ("+/-", "Size"),
-            ("</>", "Column size"),
-            ("s", "Swap"),
-            ("r", "Rotate"),
-            ("x", "Hide"),
-            ("u", "Unhide"),
-            ("Enter", "Save"),
-            ("Esc", "Done"),
+            (Pair(K::LayoutPrevPreset, K::LayoutNextPreset), "Preset"),
+            (First(K::LayoutNextPanel), "Panel"),
+            (Pair(K::LayoutGrow, K::LayoutShrink), "Size"),
+            (
+                Pair(K::LayoutShrinkColumn, K::LayoutGrowColumn),
+                "Column size",
+            ),
+            (First(K::LayoutSwap), "Swap"),
+            (First(K::LayoutRotate), "Rotate"),
+            (First(K::LayoutHide), "Hide"),
+            (First(K::LayoutUnhide), "Unhide"),
+            (First(K::LayoutSave), "Save"),
+            (First(K::LayoutDone), "Done"),
         ],
-        Some(Popup::Calendars { .. }) => &[("j/k", "Move"), ("Space", "Toggle"), ("Esc", "Close")],
-        Some(Popup::Goto { .. }) => &[("Enter", "Go"), ("Esc", "Cancel")],
+        Some(Popup::Calendars { .. }) => &[
+            (Pair(K::PopupDown, K::PopupUp), "Move"),
+            (First(K::PopupToggle), "Toggle"),
+            (First(K::PopupClose), "Close"),
+        ],
+        Some(Popup::Goto { .. }) => &[(First(K::FormSave), "Go"), (First(K::FormCancel), "Cancel")],
         Some(Popup::Form(_)) => &[
-            ("Enter", "Save"),
-            ("Tab/↓", "Next field"),
-            ("Shift-Tab/↑", "Previous"),
-            ("Ctrl-U", "Clear"),
-            ("Esc", "Cancel"),
+            (First(K::FormSave), "Save"),
+            (All(K::FormNextField), "Next field"),
+            (All(K::FormPrevField), "Previous"),
+            (First(K::FormClear), "Clear"),
+            (First(K::FormCancel), "Cancel"),
         ],
-        Some(Popup::Scope(_)) => &[("o", "This occurrence"), ("a", "All"), ("Esc", "Cancel")],
-        Some(Popup::Confirm(_)) => &[("y", "Yes"), ("n", "No")],
-        Some(_) => &[("Esc", "Close")],
+        Some(Popup::Scope(_)) => &[
+            (First(K::PopupThisOccurrence), "This occurrence"),
+            (First(K::PopupAllOccurrences), "All"),
+            (First(K::PopupClose), "Cancel"),
+        ],
+        Some(Popup::Confirm(_)) => &[(First(K::PopupYes), "Yes"), (First(K::PopupNo), "No")],
+        Some(_) => &[(First(K::PopupClose), "Close")],
         // Most important first; the bar is cut at the terminal width.
         None if app.focus == PanelKind::Todo => &[
-            ("?", "Help"),
-            ("Tab", "Panel"),
-            ("j/k", "Move"),
-            ("a", "Add"),
-            ("e", "Edit"),
-            ("d", "Delete"),
-            ("x", "Done"),
-            ("+/-", "Priority"),
-            ("C", "Show done"),
-            ("S", "Sync"),
-            ("q", "Quit"),
+            (First(K::Help), "Help"),
+            (First(K::NextPanel), "Panel"),
+            (Pair(K::Down, K::Up), "Move"),
+            (First(K::Add), "Add"),
+            (First(K::Edit), "Edit"),
+            (First(K::Delete), "Delete"),
+            (First(K::ToggleDone), "Done"),
+            (Pair(K::PriorityUp, K::PriorityDown), "Priority"),
+            (First(K::ToggleCompleted), "Show done"),
+            (First(K::Sync), "Sync"),
+            (First(K::Quit), "Quit"),
         ],
         None => &[
-            ("?", "Help"),
-            ("Tab", "Panel"),
-            ("h/l", "Day"),
-            ("j/k", "Move"),
-            ("g", "Goto"),
-            ("t", "Today"),
-            ("a", "Add"),
-            ("e", "Edit"),
-            ("d", "Delete"),
-            ("Enter", "View"),
-            ("V", "Week"),
-            ("S", "Sync"),
-            ("q", "Quit"),
+            (First(K::Help), "Help"),
+            (First(K::NextPanel), "Panel"),
+            (Pair(K::PrevDay, K::NextDay), "Day"),
+            (Pair(K::Down, K::Up), "Move"),
+            (First(K::Goto), "Goto"),
+            (First(K::Today), "Today"),
+            (First(K::Add), "Add"),
+            (First(K::Edit), "Edit"),
+            (First(K::Delete), "Delete"),
+            (First(K::Details), "View"),
+            (First(K::ToggleWeekView), "Week"),
+            (First(K::Sync), "Sync"),
+            (First(K::Quit), "Quit"),
         ],
     };
     let mut spans = vec![Span::raw(" ")];
-    for (k, label) in hints {
-        spans.push(Span::raw(*k).bold().cyan());
+    for (h, label) in hints {
+        let k = hint_keys(&app.keymap, *h);
+        if k.is_empty() {
+            continue; // unbound
+        }
+        spans.push(Span::raw(k).bold().cyan());
         spans.push(Span::raw(format!(" {label}  ")));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -1548,51 +1586,83 @@ fn popup_block(title: &str) -> Block<'_> {
         .padding(ratatui::widgets::Padding::new(1, 1, 0, 1))
 }
 
-fn draw_help(f: &mut Frame) {
+/// Keys of one action for the help pop-up: `x, Space`.
+fn help_keys(km: &Keymap, a: K) -> String {
+    let v: Vec<String> = km.keys(a).iter().map(|k| k.to_string()).collect();
+    v.join(", ")
+}
+
+/// Keys of two opposite actions: `h / l, ← / →` when they pair up.
+fn help_pair(km: &Keymap, a: K, b: K) -> String {
+    let (ka, kb) = (km.keys(a), km.keys(b));
+    if ka.is_empty() || kb.is_empty() {
+        return format!("{}{}", help_keys(km, a), help_keys(km, b));
+    }
+    if ka.len() == kb.len() {
+        let v: Vec<String> = ka
+            .iter()
+            .zip(kb)
+            .map(|(x, y)| format!("{x} / {y}"))
+            .collect();
+        return v.join(", ");
+    }
+    format!("{} / {}", help_keys(km, a), help_keys(km, b))
+}
+
+fn draw_help(f: &mut Frame, km: &Keymap) {
+    let pair = |a, b, d: &'static str| (help_pair(km, a, b), d);
+    let one = |a, d: &'static str| (help_keys(km, a), d);
     let keys = [
-        ("h / l, ← / →", "previous / next day"),
-        ("H / L", "previous / next week"),
-        ("[ / ]", "previous / next month"),
-        ("j / k, ↓ / ↑", "move selection (calendar panel: week)"),
-        (
-            "J / K, PgDn / PgUp",
+        pair(K::PrevDay, K::NextDay, "previous / next day"),
+        pair(K::PrevWeek, K::NextWeek, "previous / next week"),
+        pair(K::PrevMonth, K::NextMonth, "previous / next month"),
+        pair(K::Down, K::Up, "move selection (calendar panel: week)"),
+        pair(
+            K::ScrollDown,
+            K::ScrollUp,
             "scroll the day's hours (also the mouse wheel)",
         ),
-        ("Tab / Shift-Tab", "next / previous panel"),
-        ("t", "go to today"),
-        ("g", "go to date (2026-12-24, 12-24, 24, +7, -7)"),
-        ("Enter", "show details of the selected item"),
-        ("a", "add an event (todo panel: a todo)"),
-        ("e", "edit the selected item"),
-        ("d", "delete the selected item"),
-        ("x, Space", "todo: mark done / not done"),
-        ("+ / -", "todo: raise / lower priority"),
-        ("V", "day / week view of the appointments"),
-        ("c", "show / hide calendars"),
-        ("C", "show / hide completed todos"),
-        ("S", "sync (runs sync_command), then reload"),
-        ("R", "reload from disk"),
-        ("W", "show loading warnings"),
-        (
-            "w",
+        pair(K::NextPanel, K::PrevPanel, "next / previous panel"),
+        one(K::Today, "go to today"),
+        one(K::Goto, "go to date (2026-12-24, 12-24, 24, +7, -7)"),
+        one(K::Details, "show details of the selected item"),
+        one(K::Add, "add an event (todo panel: a todo)"),
+        one(K::Edit, "edit the selected item"),
+        one(K::Delete, "delete the selected item"),
+        one(K::ToggleDone, "todo: mark done / not done"),
+        pair(
+            K::PriorityUp,
+            K::PriorityDown,
+            "todo: raise / lower priority",
+        ),
+        one(K::ToggleWeekView, "day / week view of the appointments"),
+        one(K::Calendars, "show / hide calendars"),
+        one(K::ToggleCompleted, "show / hide completed todos"),
+        one(K::Sync, "sync (runs sync_command), then reload"),
+        one(K::Reload, "reload from disk"),
+        one(K::Warnings, "show loading warnings"),
+        one(
+            K::LayoutMode,
             "layout mode: presets, resize, swap, hide panels; Enter saves",
         ),
-        ("q", "quit"),
-        ("", ""),
-        (
-            "Markers",
-            "● calendar item  ○ read-only  * repeats  > has notes",
-        ),
+        one(K::Quit, "quit"),
     ];
-    let lines: Vec<Line> = keys
+    let row = |k: &str, d: &str| {
+        Line::from(vec![
+            Span::raw(format!(" {k:<18}")).bold().cyan(),
+            Span::raw(d.to_string()),
+        ])
+    };
+    let mut lines: Vec<Line> = keys
         .iter()
-        .map(|(k, d)| {
-            Line::from(vec![
-                Span::raw(format!(" {k:<18}")).bold().cyan(),
-                Span::raw(*d),
-            ])
-        })
+        .filter(|(k, _)| !k.is_empty()) // unbound
+        .map(|(k, d)| row(k, d))
         .collect();
+    lines.push(row("", ""));
+    lines.push(row(
+        "Markers",
+        "● calendar item  ○ read-only  * repeats  > has notes",
+    ));
     let area = popup_area(f, 74, lines.len() as u16 + 2);
     f.render_widget(Clear, area);
     f.render_widget(Paragraph::new(lines).block(popup_block("Help")), area);

@@ -6,6 +6,7 @@ pub mod config;
 pub mod edit;
 pub mod fsio;
 pub mod ical;
+pub mod keys;
 pub mod layout;
 pub mod quick;
 pub mod recur;

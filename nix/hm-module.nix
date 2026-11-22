@@ -7,6 +7,7 @@
 #       default_calendar = "personal";
 #       sync_command = "vdirsyncer sync";
 #       calendars.uni = { color = "cyan"; read_only = true; };
+#       keys = { next_day = [ "n" "Right" ]; layout.save = "ctrl+s"; };
 #     };
 #   };
 #   services.cal-tui-notify.enable = true;   # reminders as desktop notifications

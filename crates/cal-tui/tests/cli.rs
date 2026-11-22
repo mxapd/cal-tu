@@ -478,3 +478,24 @@ fn notify_failed_delivery_is_retried() {
     run(&a.iter().map(String::as_str).collect::<Vec<_>>());
     assert!(std::fs::read_to_string(&state).unwrap().contains("climb-1"));
 }
+
+#[test]
+fn check_config_reports_bad_keys() {
+    let out = run_with("[keys]\nnext_day = \"j\"\n", &["check-config"]);
+    assert_ne!(out.status, 0);
+    assert!(
+        out.stderr
+            .contains("keys.next_day: 'j' is also bound to keys.down"),
+        "{}",
+        out.stderr
+    );
+    let out = run_with("[keys.form]\nsubmit = \"Enter\"\n", &["check-config"]);
+    assert_ne!(out.status, 0);
+    assert!(
+        out.stderr.contains("keys.form.submit: unknown action"),
+        "{}",
+        out.stderr
+    );
+    let out = run_with("[keys]\nquit = \"Q\"\n", &["check-config"]);
+    assert_eq!(out.status, 0, "{}", out.stderr);
+}

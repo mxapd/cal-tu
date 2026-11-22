@@ -1,6 +1,7 @@
 //! Add/edit forms: text inputs, prefilling from an item, and turning the
 //! input into core edit requests that contain only what the user changed.
 
+use cal_core::keys::{Action as K, Keymap};
 use cal_core::quick::{describe_repeat, parse_date, parse_length, parse_repeat, parse_time};
 use cal_core::{EventEdit, Instance, Moment, NewEvent, NewTodo, Scope, Store, Todo, TodoEdit};
 use chrono::{DateTime, Duration, NaiveDate, NaiveTime};
@@ -30,18 +31,20 @@ impl Input {
             .map_or(self.text.len(), |(i, _)| i)
     }
 
-    /// Apply an editing key; returns false if the key is not for the input.
+    /// Delete everything before the cursor.
+    pub fn clear_to_start(&mut self) {
+        let b = self.byte_at(self.cursor);
+        self.text.replace_range(..b, "");
+        self.cursor = 0;
+    }
+
+    /// Apply a literal editing key (typing, Backspace, cursor movement);
+    /// returns false if the key is not for the input. Bindable commands
+    /// such as clearing are handled by the form.
     pub fn handle(&mut self, key: KeyEvent) -> bool {
         let len = self.text.chars().count();
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
-            KeyCode::Char('u') if ctrl => {
-                let b = self.byte_at(self.cursor);
-                self.text.replace_range(..b, "");
-                self.cursor = 0;
-            }
-            KeyCode::Char('a') if ctrl => self.cursor = 0,
-            KeyCode::Char('e') if ctrl => self.cursor = len,
             KeyCode::Char(c) if !ctrl => {
                 let b = self.byte_at(self.cursor);
                 self.text.insert(b, c);
@@ -371,25 +374,32 @@ impl Form {
     }
 
     /// Handle a key that is not submit/cancel.
-    pub fn handle_key(&mut self, key: KeyEvent) {
+    pub fn handle_key(&mut self, key: KeyEvent, km: &Keymap) {
         self.error = None;
         let n = self.fields.len();
-        match key.code {
-            KeyCode::Tab | KeyCode::Down => self.focus = (self.focus + 1) % n,
-            KeyCode::BackTab | KeyCode::Up => self.focus = (self.focus + n - 1) % n,
-            KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')
-                if self.focused() == FieldId::Calendar && !self.calendars.is_empty() =>
-            {
-                let m = self.calendars.len();
-                self.calendar = if key.code == KeyCode::Left {
-                    (self.calendar + m - 1) % m
-                } else {
-                    (self.calendar + 1) % m
-                };
+        let c = super::app::chord(&key);
+        let on_calendar = self.focused() == FieldId::Calendar;
+        if km.is(K::FormNextField, &c) {
+            self.focus = (self.focus + 1) % n;
+        } else if km.is(K::FormPrevField, &c) {
+            self.focus = (self.focus + n - 1) % n;
+        } else if on_calendar {
+            let m = self.calendars.len();
+            if m > 0 && km.is(K::FormNextCalendar, &c) {
+                self.calendar = (self.calendar + 1) % m;
+            } else if m > 0 && km.is(K::FormPrevCalendar, &c) {
+                self.calendar = (self.calendar + m - 1) % m;
             }
-            _ if self.focused() == FieldId::Calendar => {}
-            _ => {
-                self.fields[self.focus].input.handle(key);
+        } else {
+            let input = &mut self.fields[self.focus].input;
+            if km.is(K::FormClear, &c) {
+                input.clear_to_start();
+            } else if km.is(K::FormLineStart, &c) {
+                input.cursor = 0;
+            } else if km.is(K::FormLineEnd, &c) {
+                input.cursor = input.text.chars().count();
+            } else {
+                input.handle(key);
             }
         }
     }
@@ -633,7 +643,7 @@ mod tests {
         assert_eq!((i.text.as_str(), i.cursor), ("¡hélo", 1));
         i.handle(key(KeyCode::Delete));
         assert_eq!(i.text, "¡élo");
-        i.handle(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        i.clear_to_start();
         assert_eq!((i.text.as_str(), i.cursor), ("élo", 0));
     }
 

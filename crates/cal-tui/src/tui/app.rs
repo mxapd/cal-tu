@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use super::form::{Form, Submit};
 use super::layout::{Dir, Node, PanelKind};
+use cal_core::keys::{Action as K, Context, Key, KeyChord, Keymap};
 use cal_core::layout::{LayoutConfig, BUILTIN};
 use ratatui::layout::{Position, Rect};
 
@@ -122,6 +123,8 @@ pub struct App {
     pub todo_sel: usize,
     pub popup: Option<Popup>,
     pub message: Option<String>,
+    /// Key bindings (defaults plus `[keys]`).
+    pub keymap: Keymap,
     /// The layout in use (possibly changed in layout mode).
     pub layout: Node,
     /// Preset it came from, and whether it was changed since.
@@ -186,6 +189,19 @@ impl App {
             startup_message = Some(format!("Ignoring saved layout: {e}"));
             LayoutConfig::default()
         });
+        // Same for key bindings: bad ones fall back to the defaults.
+        let keymap = match config.keymap() {
+            Ok(k) => {
+                if let Some(c) = k.conflicts().first() {
+                    startup_message = Some(format!("Key conflict: {c}"));
+                }
+                k
+            }
+            Err(e) => {
+                startup_message = Some(format!("Ignoring [keys] in config: {e}"));
+                Keymap::default()
+            }
+        };
         let mut app = App {
             config,
             store,
@@ -198,6 +214,7 @@ impl App {
             todo_sel: 0,
             popup: None,
             message: startup_message,
+            keymap,
             layout: Node::builtin("classic").expect("built-in"),
             layout_name: "classic".into(),
             layout_modified: false,
@@ -413,30 +430,33 @@ impl App {
             self.handle_layout_key(key);
             return Action::None;
         }
-        match key.code {
-            KeyCode::Char('q') => return Action::Quit,
-            KeyCode::Char('?') => self.popup = Some(Popup::Help),
-            KeyCode::Tab => self.cycle_focus(1),
-            KeyCode::BackTab => self.cycle_focus(-1),
-            KeyCode::Char('h') | KeyCode::Left => self.shift_days(-1),
-            KeyCode::Char('l') | KeyCode::Right => self.shift_days(1),
-            KeyCode::Char('H') => self.shift_days(-7),
-            KeyCode::Char('L') => self.shift_days(7),
-            KeyCode::Char('[') => self.shift_months(-1),
-            KeyCode::Char(']') => self.shift_months(1),
-            KeyCode::Char('J') | KeyCode::PageDown => self.scroll_day(1),
-            KeyCode::Char('K') | KeyCode::PageUp => self.scroll_day(-1),
-            KeyCode::Char('j') | KeyCode::Down => self.move_vertical(1),
-            KeyCode::Char('k') | KeyCode::Up => self.move_vertical(-1),
-            KeyCode::Char('t') => self.set_date(self.today()),
-            KeyCode::Char('g') => {
+        let Some(action) = self.keymap.find(Context::Main, &chord(&key)) else {
+            return Action::None;
+        };
+        match action {
+            K::Quit => return Action::Quit,
+            K::Help => self.popup = Some(Popup::Help),
+            K::NextPanel => self.cycle_focus(1),
+            K::PrevPanel => self.cycle_focus(-1),
+            K::PrevDay => self.shift_days(-1),
+            K::NextDay => self.shift_days(1),
+            K::PrevWeek => self.shift_days(-7),
+            K::NextWeek => self.shift_days(7),
+            K::PrevMonth => self.shift_months(-1),
+            K::NextMonth => self.shift_months(1),
+            K::ScrollDown => self.scroll_day(1),
+            K::ScrollUp => self.scroll_day(-1),
+            K::Down => self.move_vertical(1),
+            K::Up => self.move_vertical(-1),
+            K::Today => self.set_date(self.today()),
+            K::Goto => {
                 self.popup = Some(Popup::Goto {
                     input: String::new(),
                     error: None,
                 })
             }
-            KeyCode::Char('c') => self.popup = Some(Popup::Calendars { sel: 0 }),
-            KeyCode::Char('V') => {
+            K::Calendars => self.popup = Some(Popup::Calendars { sel: 0 }),
+            K::ToggleWeekView => {
                 self.appt_view = match self.appt_view {
                     ApptView::Day => ApptView::Week,
                     ApptView::Week => ApptView::Day,
@@ -444,18 +464,18 @@ impl App {
                 self.day_scroll = None;
                 self.refresh();
             }
-            KeyCode::Char('C') => {
+            K::ToggleCompleted => {
                 self.show_completed = !self.show_completed;
                 self.refresh();
             }
-            KeyCode::Char('W') => self.popup = Some(Popup::Warnings { scroll: 0 }),
-            KeyCode::Char('w') => self.layout_mode = true,
-            KeyCode::Char('R') => {
+            K::Warnings => self.popup = Some(Popup::Warnings { scroll: 0 }),
+            K::LayoutMode => self.layout_mode = true,
+            K::Reload => {
                 self.reload();
                 self.message = Some("Reloaded".into());
             }
-            KeyCode::Char('S') => return Action::Sync,
-            KeyCode::Enter => {
+            K::Sync => return Action::Sync,
+            K::Details => {
                 let has = match self.focus {
                     PanelKind::Todo => self.selected_todo().is_some(),
                     _ => self.selected_instance().is_some(),
@@ -464,12 +484,12 @@ impl App {
                     self.popup = Some(Popup::Details);
                 }
             }
-            KeyCode::Char('a') => self.start_add(),
-            KeyCode::Char('e') => self.start_edit(),
-            KeyCode::Char('d') => self.start_delete(),
-            KeyCode::Char('x') | KeyCode::Char(' ') => self.toggle_todo_done(),
-            KeyCode::Char('+') => self.bump_priority(true),
-            KeyCode::Char('-') => self.bump_priority(false),
+            K::Add => self.start_add(),
+            K::Edit => self.start_edit(),
+            K::Delete => self.start_delete(),
+            K::ToggleDone => self.toggle_todo_done(),
+            K::PriorityUp => self.bump_priority(true),
+            K::PriorityDown => self.bump_priority(false),
             _ => {}
         }
         Action::None
@@ -784,7 +804,7 @@ impl App {
                 // A click outside closes simple pop-ups, like Esc. Forms and
                 // questions need an explicit answer.
                 _ if !matches!(popup, Popup::Form(_) | Popup::Scope(_) | Popup::Confirm(_)) => {
-                    self.handle_popup_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+                    self.close_popup();
                 }
                 _ => {}
             }
@@ -930,50 +950,47 @@ impl App {
         use super::layout as l;
         let panel = self.focus;
         let area = self.main_area;
-        let changed = match key.code {
-            KeyCode::Esc | KeyCode::Char('w') | KeyCode::Char('q') => {
+        let Some(action) = self.keymap.find(Context::Layout, &chord(&key)) else {
+            return;
+        };
+        let changed = match action {
+            K::LayoutDone => {
                 self.layout_mode = false;
                 return;
             }
-            KeyCode::Tab => {
+            K::LayoutNextPanel => {
                 self.cycle_focus(1);
                 return;
             }
-            KeyCode::BackTab => {
+            K::LayoutPrevPanel => {
                 self.cycle_focus(-1);
                 return;
             }
-            KeyCode::Right | KeyCode::Char('n') | KeyCode::Left | KeyCode::Char('p') => {
+            K::LayoutNextPreset | K::LayoutPrevPreset => {
                 let names = self.preset_names();
                 let i = names
                     .iter()
                     .position(|n| *n == self.layout_name)
                     .unwrap_or(0) as i32;
-                let step = if matches!(key.code, KeyCode::Left | KeyCode::Char('p')) {
-                    -1
-                } else {
-                    1
-                };
+                let step = if action == K::LayoutPrevPreset { -1 } else { 1 };
                 let next = names[(i + step).rem_euclid(names.len() as i32) as usize].clone();
                 self.set_preset(&next);
                 self.fix_focus();
                 return;
             }
-            KeyCode::Char('+') | KeyCode::Char('=') => {
-                l::resize(&mut self.layout, panel, true, 5, area)
-            }
-            KeyCode::Char('-') => l::resize(&mut self.layout, panel, true, -5, area),
-            KeyCode::Char('>') => l::resize(&mut self.layout, panel, false, 5, area),
-            KeyCode::Char('<') => l::resize(&mut self.layout, panel, false, -5, area),
-            KeyCode::Char('s') => l::swap(&mut self.layout, panel),
-            KeyCode::Char('r') => l::rotate(&mut self.layout, panel),
-            KeyCode::Char('x') => {
+            K::LayoutGrow => l::resize(&mut self.layout, panel, true, 5, area),
+            K::LayoutShrink => l::resize(&mut self.layout, panel, true, -5, area),
+            K::LayoutGrowColumn => l::resize(&mut self.layout, panel, false, 5, area),
+            K::LayoutShrinkColumn => l::resize(&mut self.layout, panel, false, -5, area),
+            K::LayoutSwap => l::swap(&mut self.layout, panel),
+            K::LayoutRotate => l::rotate(&mut self.layout, panel),
+            K::LayoutHide => {
                 let ok = l::hide(&mut self.layout, panel);
                 self.fix_focus();
                 ok
             }
-            KeyCode::Char('u') => l::unhide(&mut self.layout),
-            KeyCode::Enter => {
+            K::LayoutUnhide => l::unhide(&mut self.layout),
+            K::LayoutSave => {
                 self.save_layout();
                 return;
             }
@@ -1049,39 +1066,49 @@ impl App {
         }
     }
 
+    /// Close the open pop-up as its close/cancel key would.
+    fn close_popup(&mut self) {
+        if let Some(Popup::Calendars { .. }) = self.popup.take() {
+            self.apply_visibility();
+            self.refresh();
+        }
+    }
+
     fn handle_popup_key(&mut self, key: KeyEvent) {
         let Some(popup) = self.popup.take() else {
             return;
         };
-        let close = matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
-            && !matches!(popup, Popup::Goto { .. } | Popup::Form(_));
-        if close || (key.code == KeyCode::Esc) {
-            if let Popup::Calendars { .. } = popup {
-                self.apply_visibility();
-                self.refresh();
-            }
+        let c = chord(&key);
+        let km = &self.keymap;
+        // Text prompts close with the form's cancel key, so a plain `q` can
+        // be typed; everything else with the pop-up close key.
+        let close = match popup {
+            Popup::Goto { .. } | Popup::Form(_) => km.is(K::FormCancel, &c),
+            _ => km.is(K::PopupClose, &c),
+        };
+        if close {
+            self.popup = Some(popup);
+            self.close_popup();
             return;
         }
         self.popup = Some(match popup {
             Popup::Form(mut form) => {
-                let ctrl_s =
-                    key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('s');
-                if key.code == KeyCode::Enter || ctrl_s {
+                if km.is(K::FormSave, &c) {
                     match self.submit(&form) {
                         Ok(()) => return,
                         Err(e) => form.error = Some(e),
                     }
                 } else {
-                    form.handle_key(key);
+                    form.handle_key(key, km);
                 }
                 Popup::Form(form)
             }
             Popup::Scope(pending) => {
-                let scope = match (key.code, &pending) {
-                    (KeyCode::Char('o' | 'O'), Pending::Edit(i) | Pending::Delete(i)) => {
+                let scope = match &pending {
+                    Pending::Edit(i) | Pending::Delete(i) if km.is(K::PopupThisOccurrence, &c) => {
                         i.recurrence_id.map(Scope::Occurrence)
                     }
-                    (KeyCode::Char('a' | 'A'), _) => Some(Scope::All),
+                    _ if km.is(K::PopupAllOccurrences, &c) => Some(Scope::All),
                     _ => None,
                 };
                 match scope {
@@ -1092,67 +1119,110 @@ impl App {
                     None => Popup::Scope(pending),
                 }
             }
-            Popup::Confirm(pending) => match key.code {
-                KeyCode::Char('y' | 'Y') => {
+            Popup::Confirm(pending) => {
+                if km.is(K::PopupYes, &c) {
                     self.run_pending(pending, Scope::All);
                     return;
                 }
-                KeyCode::Char('n' | 'N') => return,
-                _ => Popup::Confirm(pending),
-            },
+                if km.is(K::PopupNo, &c) {
+                    return;
+                }
+                Popup::Confirm(pending)
+            }
             Popup::Help | Popup::Details => {
-                if matches!(key.code, KeyCode::Enter | KeyCode::Char('?')) {
+                // The help key toggles help (and details) off again.
+                if km.is(K::PopupAccept, &c) || km.is(K::Help, &c) {
                     return;
                 }
                 popup
             }
-            Popup::Warnings { scroll } => match key.code {
-                KeyCode::Char('j') | KeyCode::Down => Popup::Warnings { scroll: scroll + 1 },
-                KeyCode::Char('k') | KeyCode::Up => Popup::Warnings {
-                    scroll: scroll.saturating_sub(1),
-                },
-                KeyCode::Enter => return,
-                _ => popup,
-            },
-            Popup::Calendars { sel } => {
-                let n = self.store.calendars.len();
-                match key.code {
-                    KeyCode::Char('j') | KeyCode::Down => Popup::Calendars {
-                        sel: step(sel, 1, n),
-                    },
-                    KeyCode::Char('k') | KeyCode::Up => Popup::Calendars {
-                        sel: step(sel, -1, n),
-                    },
-                    KeyCode::Char(' ') | KeyCode::Enter => {
-                        self.toggle_calendar(sel);
-                        Popup::Calendars { sel }
+            Popup::Warnings { scroll } => {
+                if km.is(K::PopupDown, &c) {
+                    Popup::Warnings { scroll: scroll + 1 }
+                } else if km.is(K::PopupUp, &c) {
+                    Popup::Warnings {
+                        scroll: scroll.saturating_sub(1),
                     }
-                    _ => popup,
+                } else if km.is(K::PopupAccept, &c) {
+                    return;
+                } else {
+                    popup
                 }
             }
-            Popup::Goto { mut input, .. } => match key.code {
-                KeyCode::Enter => match parse_goto(&input, self.date, self.today()) {
-                    Some(d) => {
-                        self.set_date(d);
-                        return;
+            Popup::Calendars { sel } => {
+                let n = self.store.calendars.len();
+                if km.is(K::PopupDown, &c) {
+                    Popup::Calendars {
+                        sel: step(sel, 1, n),
                     }
-                    None => Popup::Goto {
-                        error: Some(format!("Cannot understand '{input}'")),
-                        input,
-                    },
-                },
-                KeyCode::Backspace => {
-                    input.pop();
+                } else if km.is(K::PopupUp, &c) {
+                    Popup::Calendars {
+                        sel: step(sel, -1, n),
+                    }
+                } else if km.is(K::PopupToggle, &c) {
+                    self.toggle_calendar(sel);
+                    Popup::Calendars { sel }
+                } else {
+                    popup
+                }
+            }
+            Popup::Goto { mut input, .. } => {
+                if km.is(K::FormSave, &c) {
+                    match parse_goto(&input, self.date, self.today()) {
+                        Some(d) => {
+                            self.set_date(d);
+                            return;
+                        }
+                        None => Popup::Goto {
+                            error: Some(format!("Cannot understand '{input}'")),
+                            input,
+                        },
+                    }
+                } else {
+                    match key.code {
+                        KeyCode::Backspace => {
+                            input.pop();
+                        }
+                        KeyCode::Char(ch) => input.push(ch),
+                        _ => {}
+                    }
                     Popup::Goto { input, error: None }
                 }
-                KeyCode::Char(c) => {
-                    input.push(c);
-                    Popup::Goto { input, error: None }
-                }
-                _ => Popup::Goto { input, error: None },
-            },
+            }
         });
     }
+}
+
+/// A terminal key event as a key binding.
+pub(super) fn chord(key: &KeyEvent) -> KeyChord {
+    let k = match key.code {
+        KeyCode::Char(c) => Key::Char(c),
+        KeyCode::Enter => Key::Enter,
+        KeyCode::Esc => Key::Esc,
+        KeyCode::Tab => Key::Tab,
+        KeyCode::BackTab => Key::BackTab,
+        KeyCode::Backspace => Key::Backspace,
+        KeyCode::Delete => Key::Delete,
+        KeyCode::Insert => Key::Insert,
+        KeyCode::Left => Key::Left,
+        KeyCode::Right => Key::Right,
+        KeyCode::Up => Key::Up,
+        KeyCode::Down => Key::Down,
+        KeyCode::Home => Key::Home,
+        KeyCode::End => Key::End,
+        KeyCode::PageUp => Key::PageUp,
+        KeyCode::PageDown => Key::PageDown,
+        KeyCode::F(n) => Key::F(n),
+        // Keys no binding can name; nothing matches U+0000.
+        _ => Key::Char('\0'),
+    };
+    let m = key.modifiers;
+    KeyChord::new(
+        k,
+        m.contains(KeyModifiers::CONTROL),
+        m.contains(KeyModifiers::ALT),
+        m.contains(KeyModifiers::SHIFT),
+    )
 }
 
 fn step(cur: usize, dir: i32, len: usize) -> usize {

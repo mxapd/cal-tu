@@ -1343,4 +1343,93 @@ mod tests {
         press(&mut app, '?');
         snapshot::assert_snapshot("tui_help", &render(&mut app));
     }
+
+    fn keyed_app(keys: &str) -> App {
+        app_with(
+            FIXTURES,
+            keys,
+            Path::new("/nonexistent/cal-tui/layout.toml"),
+        )
+    }
+
+    #[test]
+    fn rebound_keys_drive_the_app_and_show_in_help_and_hints() {
+        let mut app = keyed_app(
+            r#"
+            [keys]
+            next_day = "n"
+            sync = []
+            [keys.popup]
+            close = "Q"
+            "#,
+        );
+        let day = app.date;
+        press(&mut app, 'l');
+        assert_eq!(app.date, day, "l is no longer bound");
+        press(&mut app, 'n');
+        assert_eq!(app.date, day + chrono::Duration::days(1));
+        press(&mut app, 'h');
+
+        let screen = render(&mut app);
+        assert!(screen.contains("h/n Day"), "{screen}");
+        assert!(
+            !screen.contains("Sync"),
+            "unbound sync has no hint: {screen}"
+        );
+
+        press(&mut app, '?');
+        let screen = render(&mut app);
+        assert!(screen.contains("h, ← / n"), "{screen}");
+        assert!(!screen.contains("sync (runs"), "{screen}");
+        assert!(screen.contains("Q Close"), "{screen}");
+        press(&mut app, 'q');
+        assert!(app.popup.is_some(), "q no longer closes pop-ups");
+        press(&mut app, 'Q');
+        assert!(app.popup.is_none());
+    }
+
+    #[test]
+    fn shifted_letters_match_with_or_without_the_shift_flag() {
+        let mut app = app();
+        let day = app.date;
+        // Terminals report 'H' with SHIFT set; bindings say just "H".
+        app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
+        assert_eq!(app.date, day - chrono::Duration::days(7));
+        app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert_eq!(app.focus, layout::PanelKind::Todo);
+    }
+
+    #[test]
+    fn rebound_form_keys() {
+        let mut app = keyed_app("[keys.form]\nsave = \"ctrl+s\"\nclear = \"ctrl+w\"");
+        press(&mut app, 'a');
+        typ(&mut app, "Dentist");
+        app.handle_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL));
+        let Some(app::Popup::Form(form)) = &app.popup else {
+            panic!("form closed")
+        };
+        assert_eq!(form.fields[0].input.text, "");
+        key(&mut app, KeyCode::Enter);
+        assert!(
+            matches!(app.popup, Some(app::Popup::Form(_))),
+            "Enter no longer saves"
+        );
+        assert!(render(&mut app).contains("Ctrl-S Save"));
+    }
+
+    #[test]
+    fn bad_keys_fall_back_to_defaults_with_a_message() {
+        let mut app = keyed_app("[keys]\nnext_day = \"hyper+x\"");
+        assert!(
+            app.message
+                .as_deref()
+                .unwrap()
+                .starts_with("Ignoring [keys] in config: keys.next_day"),
+            "{:?}",
+            app.message
+        );
+        let day = app.date;
+        press(&mut app, 'l');
+        assert_eq!(app.date, day + chrono::Duration::days(1));
+    }
 }
