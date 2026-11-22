@@ -728,11 +728,6 @@ mod tests {
         render(&mut app);
         click_on(&mut app, app::Hit::Next);
         assert_eq!(app.date, day(12, 16));
-        // Week view: a week at a time.
-        press(&mut app, 'v');
-        render(&mut app);
-        click_on(&mut app, app::Hit::Next);
-        assert_eq!(app.date, day(12, 23));
     }
 
     #[test]
@@ -1229,8 +1224,8 @@ mod tests {
             Err(_) => app(),
         };
         println!("{}", render(&mut app));
-        app.focus = layout::PanelKind::Calendar;
-        app.cal_view = app::CalView::Week;
+        app.focus = layout::PanelKind::Appointments;
+        app.appt_view = app::ApptView::Week;
         app.refresh();
         println!("{}", render(&mut app));
     }
@@ -1242,10 +1237,109 @@ mod tests {
     }
 
     #[test]
-    fn week_view_and_help() {
+    fn appointments_week_view() {
         let mut app = app();
+        press(&mut app, 'V');
+        assert_eq!(app.appt_view, app::ApptView::Week);
+        let screen = render(&mut app);
+        snapshot::assert_snapshot("tui_appt_week", &screen);
+        assert!(
+            screen.contains("Week 47 · 16–22 November · this week"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("Mo 16") && screen.contains("Su 22"),
+            "{screen}"
+        );
+        // Hour lines never show through events.
+        for line in screen.lines() {
+            if line.contains("Linear") {
+                let col: String = line.chars().skip(7).take(8).collect();
+                assert!(!col.contains('┈'), "{line}");
+            }
+        }
+
+        // l moves the selected column; selection and edits follow that day.
+        press(&mut app, 'l');
+        assert_eq!(app.date, NaiveDate::from_ymd_opt(2026, 11, 17).unwrap());
+        assert_eq!(
+            app.selected_instance().map(|i| i.summary.as_str()),
+            Some("Floating standup")
+        );
+        assert!(render(&mut app).contains("Week 47"), "still the same week");
+
+        // V again: back to the single day.
+        press(&mut app, 'V');
+        assert!(render(&mut app).contains("Tuesday 17 November 2026"));
+    }
+
+    #[test]
+    fn week_items_cover_monday_to_sunday() {
+        let mut app = app();
+        press(&mut app, 'V');
+        let sunday = NaiveDate::from_ymd_opt(2026, 11, 22).unwrap();
+        app.date = sunday;
+        app.refresh();
+        let days: Vec<NaiveDate> = app.week_items.iter().map(|(d, _)| *d).collect();
+        let monday = NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        assert_eq!(
+            days,
+            (0..7)
+                .map(|n| monday + chrono::Duration::days(n))
+                .collect::<Vec<_>>()
+        );
+        let (_, items) = app.week_items.last().unwrap();
+        assert_eq!(
+            items.len(),
+            app.day_items.len(),
+            "selected day matches day_items"
+        );
+        press(&mut app, 'V');
+        assert!(app.week_items.is_empty());
+    }
+
+    #[test]
+    fn week_view_click_selects_day_and_item() {
+        let mut app = app();
+        press(&mut app, 'V');
+        render(&mut app);
+        let tue = NaiveDate::from_ymd_opt(2026, 11, 17).unwrap();
+        let (rect, hit) = *app
+            .hits
+            .iter()
+            .find(|(_, h)| matches!(h, app::Hit::WeekItem(d, _) if *d == tue))
+            .expect("an item on Tuesday");
+        app.handle_mouse(ratatui::crossterm::event::MouseEvent {
+            kind: ratatui::crossterm::event::MouseEventKind::Down(
+                ratatui::crossterm::event::MouseButton::Left,
+            ),
+            column: rect.x,
+            row: rect.y,
+            modifiers: KeyModifiers::NONE,
+        });
+        let app::Hit::WeekItem(_, i) = hit else {
+            unreachable!()
+        };
+        assert_eq!(app.date, tue);
+        assert_eq!(app.appt_sel, i);
+        assert_eq!(app.focus, layout::PanelKind::Appointments);
+    }
+
+    #[test]
+    fn week_view_falls_back_to_day_when_narrow() {
+        let mut app = app();
+        press(&mut app, 'V');
+        let screen = render_size(&mut app, 50, 40);
+        assert!(screen.contains("today · no room for week"), "{screen}");
+    }
+
+    #[test]
+    fn help_popup() {
+        let mut app = app();
+        // `v` used to switch the calendar panel to a week list; the panel is
+        // always the month now.
         press(&mut app, 'v');
-        snapshot::assert_snapshot("tui_week", &render(&mut app));
+        assert!(render(&mut app).contains("‹  November 2026  ›"));
         press(&mut app, '?');
         snapshot::assert_snapshot("tui_help", &render(&mut app));
     }

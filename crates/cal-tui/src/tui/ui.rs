@@ -2,13 +2,14 @@
 
 use cal_core::{Instance, Kind, Moment};
 use chrono::{Datelike, Duration, NaiveDate};
+use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 
-use super::app::{App, CalView, Hit, Pending, Popup};
+use super::app::{week_start, App, ApptView, Hit, Pending, Popup};
 use super::form::{FieldId, Form};
 use super::layout::{Dir, PanelKind};
 use crate::fmt::{humanize, parse_color, time_range, Rgb, TimeRange};
@@ -406,13 +407,20 @@ fn put(
 /// The appointments panel: a header with the date and weather, all-day items,
 /// then an hour grid with events as blocks.
 fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
+    let week = app.appt_view == ApptView::Week;
+    if week && week_fits(area.width) {
+        return draw_week(f, app, area);
+    }
     let today = app.today();
     let is_today = app.date == today;
-    let title = if is_today {
+    let mut title = if is_today {
         app.date.format("%A %-d %B · today").to_string()
     } else {
         app.date.format("%A %-d %B %Y").to_string()
     };
+    if week {
+        title.push_str(" · no room for week");
+    }
     let inner = panel_frame(f, app, PanelKind::Appointments, &title, area, false);
     if let Some(w) = weather_line(app) {
         let need = title.chars().count() + w.width() + 6;
@@ -438,12 +446,7 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
     let buf = f.buffer_mut();
 
     // All-day items and due todos: one row each at the top.
-    let (all_day, timed): (Vec<usize>, Vec<usize>) = (0..app.day_items.len()).partition(|&i| {
-        matches!(
-            time_range(&app.day_items[i], app.date, home),
-            TimeRange::AllDay | TimeRange::Due(_)
-        )
-    });
+    let (all_day, timed) = split_all_day(app, &app.day_items, app.date);
     let mut y = inner.y;
     if app.day_items.is_empty() {
         put(
@@ -486,182 +489,345 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
     // (offset, rows per hour, largest offset) of the hour grid, for scrolling.
     let mut day_view = (0u32, 1u32, 0u32);
     if grid.height >= 2 {
-        let day_start = app.store.day_start(app.date);
-        let day_end = app.store.day_start(app.date + Duration::days(1));
-        let minutes = |t: chrono::DateTime<chrono_tz::Tz>| {
-            (t.clamp(day_start, day_end) - day_start)
-                .num_minutes()
-                .max(0) as u32
-        };
-        // (index, start minute, end minute) of each timed item today.
-        let spans_min: Vec<(usize, u32, u32)> = timed
+        let spans_min = timed_spans(app, &app.day_items, &timed, app.date);
+        let now_min = is_today.then(|| day_minute(app, app.date, now));
+        let selected = spans_min
             .iter()
-            .map(|&i| {
-                let inst = &app.day_items[i];
-                let s = minutes(inst.start.instant(home));
-                let e = minutes(inst.end.instant(home)).max(s + 1);
-                (i, s, e)
-            })
-            .collect();
-        // The whole day (00–24) can be scrolled. Density is chosen so the
-        // usual hours (08–20, widened for events) fit the panel.
+            .find(|(i, _, _)| *i == app.appt_sel)
+            .map(|(_, s, _)| *s);
+        let g = HourGrid::new(
+            app,
+            grid.height,
+            spans_min.iter().map(|&(_, s, e)| (s, e)),
+            selected,
+            now_min,
+        );
+        day_view = (g.offset, g.rph, g.max_offset);
+        let x0 = grid.x + LABEL_W + 1;
+        let cw = grid.width.saturating_sub(LABEL_W + 1);
+        draw_hour_axis(buf, grid, &g, x0, cw);
+        let mut occupied = vec![vec![false; grid.width as usize]; grid.height as usize];
+        let col = Column {
+            items: &app.day_items,
+            spans: &spans_min,
+            x: x0,
+            width: cw,
+            selected: Some(app.appt_sel),
+            past_before: is_today.then_some(now),
+            compact: false,
+        };
+        draw_blocks(
+            buf,
+            app,
+            grid,
+            &g,
+            &col,
+            sel_bg,
+            &mut occupied,
+            &mut hits,
+            Hit::Appointment,
+        );
+        if let Some(n) = now_min {
+            draw_now_line(buf, grid, &g, n, now, x0, cw, &occupied);
+        }
+    }
+    app.hits.extend(hits);
+    app.day_view = day_view;
+}
+
+/// Width of the hour labels left of the grid's rule.
+const LABEL_W: u16 = 6;
+/// Narrowest day column (without its separator) the week grid will draw.
+const WEEK_MIN_COL: u16 = 6;
+
+/// Can the week grid fit in a panel this wide?
+fn week_fits(width: u16) -> bool {
+    width >= LABEL_W + 1 + 7 * (WEEK_MIN_COL + 1)
+}
+
+/// Minutes since the start of `day` (clamped to that day).
+fn day_minute(app: &App, day: NaiveDate, t: chrono::DateTime<chrono_tz::Tz>) -> u32 {
+    let day_start = app.store.day_start(day);
+    let day_end = app.store.day_start(day + Duration::days(1));
+    (t.clamp(day_start, day_end) - day_start)
+        .num_minutes()
+        .max(0) as u32
+}
+
+/// (index, start minute, end minute) of each timed item of `day`.
+fn timed_spans(
+    app: &App,
+    items: &[Instance],
+    timed: &[usize],
+    day: NaiveDate,
+) -> Vec<(usize, u32, u32)> {
+    let home = app.store.home;
+    timed
+        .iter()
+        .map(|&i| {
+            let inst = &items[i];
+            let s = day_minute(app, day, inst.start.instant(home));
+            let e = day_minute(app, day, inst.end.instant(home)).max(s + 1);
+            (i, s, e)
+        })
+        .collect()
+}
+
+/// Indices of the all-day items (and due todos) of `day`, then the timed ones.
+fn split_all_day(app: &App, items: &[Instance], day: NaiveDate) -> (Vec<usize>, Vec<usize>) {
+    (0..items.len()).partition(|&i| {
+        matches!(
+            time_range(&items[i], day, app.store.home),
+            TimeRange::AllDay | TimeRange::Due(_)
+        )
+    })
+}
+
+/// Vertical geometry of an hour grid: the whole day (00–24) can be
+/// scrolled, at a density chosen so the usual hours fit.
+struct HourGrid {
+    /// First row shown (rows from 00:00).
+    offset: u32,
+    max_offset: u32,
+    /// Rows in the whole day.
+    total: u32,
+    rph: u32,
+}
+
+impl HourGrid {
+    /// `spans` are the (start, end) minutes of the items shown; `selected` is
+    /// the start minute of the selected item, `now` the current minute (if
+    /// shown). The usual hours (08–20) are widened to fit the items.
+    fn new(
+        app: &App,
+        height: u16,
+        spans: impl Iterator<Item = (u32, u32)>,
+        selected: Option<u32>,
+        now: Option<u32>,
+    ) -> HourGrid {
         let mut want_first = DAY_FIRST_HOUR;
         let mut want_last = DAY_LAST_HOUR;
-        for &(_, s, e) in &spans_min {
+        for (s, e) in spans {
             want_first = want_first.min(s / 60);
             want_last = want_last.max(e.div_ceil(60));
         }
-        let now_min = is_today.then(|| minutes(now));
         let span_hours = (want_last.min(24) - want_first).max(1);
-        let rph = (grid.height as u32 / span_hours).clamp(1, 4);
-        let first = 0u32;
-        let slot = 60 / rph;
+        let rph = (height as u32 / span_hours).clamp(1, 4);
         let total = 24 * rph;
-        let row_of = |m: u32| m / slot;
-        let view = grid.height as u32;
+        let view = height as u32;
         let max_offset = total.saturating_sub(view);
-
-        // Automatic position: the usual hours, unless the selected event (or
+        let mut g = HourGrid {
+            offset: 0,
+            max_offset,
+            total,
+            rph,
+        };
+        // Automatic position: the usual hours, unless the selected item (or
         // now) would be outside them; then that, a third from the top.
-        let base = row_of(want_first * 60);
-        let focus_row = spans_min
-            .iter()
-            .find(|(i, _, _)| *i == app.appt_sel)
-            .map(|(_, s, _)| row_of(*s))
-            .or(now_min.map(row_of));
+        let base = g.row_of(want_first * 60);
+        let focus_row = selected.or(now).map(|m| g.row_of(m));
         let auto = match focus_row {
             Some(r) if r < base || r >= base + view => r.saturating_sub(view / 3),
             _ => base,
         };
-        let offset = app.day_scroll.unwrap_or(auto).min(max_offset);
-        day_view = (offset, rph, max_offset);
+        g.offset = app.day_scroll.unwrap_or(auto).min(max_offset);
+        g
+    }
 
-        // Hour labels and the rule.
-        const LABEL_W: u16 = 6;
-        let x0 = grid.x + LABEL_W + 1;
-        let cw = grid.width.saturating_sub(LABEL_W + 1);
-        for r in 0..grid.height {
-            let abs = offset + r as u32;
-            if abs >= total {
-                break;
-            }
-            let text = if abs.is_multiple_of(rph) {
-                format!(" {:02}:00", first + abs / rph)
-            } else {
-                String::new()
-            };
-            buf.set_string(grid.x, grid.y + r, format!("{text:<6}"), label);
+    fn row_of(&self, minute: u32) -> u32 {
+        minute / (60 / self.rph)
+    }
+
+    /// Screen row (from the grid's top) of absolute row `abs`, if visible.
+    fn visible(&self, abs: u32, height: u16) -> Option<u16> {
+        abs.checked_sub(self.offset)
+            .filter(|r| *r < height as u32)
+            .map(|r| r as u16)
+    }
+}
+
+/// Hour labels, the rule, faint dotted hour lines over `x0..x0 + cw`, and
+/// the ▲ ▼ markers when more hours are above / below.
+fn draw_hour_axis(buf: &mut Buffer, grid: Rect, g: &HourGrid, x0: u16, cw: u16) {
+    let label = Style::new().fg(Color::Indexed(244));
+    for r in 0..grid.height {
+        let abs = g.offset + r as u32;
+        if abs >= g.total {
+            break;
+        }
+        let text = if abs.is_multiple_of(g.rph) {
+            format!(" {:02}:00", abs / g.rph)
+        } else {
+            String::new()
+        };
+        buf.set_string(grid.x, grid.y + r, format!("{text:<6}"), label);
+        buf.set_string(
+            grid.x + LABEL_W,
+            grid.y + r,
+            "│",
+            Style::new().fg(Color::Indexed(240)),
+        );
+    }
+
+    // A faint dotted line at each full hour (behind the events, which are
+    // drawn next). Colour: one step above the background of the Stylix
+    // scheme this was tuned on. See DESIGN.md for the band variants.
+    for r in 0..grid.height {
+        let abs = g.offset + r as u32;
+        if abs >= g.total {
+            break;
+        }
+        if abs.is_multiple_of(g.rph) && abs > 0 {
+            let dots = "┈".repeat(cw as usize);
             buf.set_string(
-                grid.x + LABEL_W,
+                x0,
                 grid.y + r,
-                "│",
-                Style::new().fg(Color::Indexed(240)),
+                dots,
+                Style::new().fg(Color::Rgb(36, 45, 56)),
             );
         }
+    }
 
-        // A faint dotted line at each full hour (behind the events, which are
-        // drawn next). Colour: one step above the background of the Stylix
-        // scheme this was tuned on. See DESIGN.md for the band variants.
-        for r in 0..grid.height {
-            let abs = offset + r as u32;
-            if abs >= total {
-                break;
+    let more = Style::new().fg(Color::Indexed(250));
+    if g.offset > 0 {
+        buf.set_string(grid.x + LABEL_W, grid.y, "▲", more);
+    }
+    if g.offset < g.max_offset {
+        buf.set_string(grid.x + LABEL_W, grid.bottom() - 1, "▼", more);
+    }
+}
+
+/// Lanes for overlapping events: (lane of each span, lanes in its cluster).
+/// Events are grouped into clusters that overlap each other; only a cluster
+/// is split into lanes, so an event that overlaps nothing keeps the full
+/// width. (Items are sorted by start, so a cluster ends where nothing running
+/// reaches the next.)
+fn lanes(spans: &[(usize, u32, u32)], g: &HourGrid) -> (Vec<usize>, Vec<usize>) {
+    let mut lane_of = vec![0usize; spans.len()];
+    let mut lanes_of = vec![1usize; spans.len()];
+    let mut cluster: Vec<usize> = Vec::new();
+    let mut lane_end: Vec<u32> = Vec::new();
+    let mut cluster_end = 0u32;
+    let close = |cluster: &mut Vec<usize>, lanes: usize, lanes_of: &mut Vec<usize>| {
+        for k in cluster.drain(..) {
+            lanes_of[k] = lanes.max(1);
+        }
+    };
+    for (k, &(_, s, e)) in spans.iter().enumerate() {
+        let (srow, erow) = (g.row_of(s), g.row_of(e).max(g.row_of(s) + 1));
+        if !cluster.is_empty() && srow >= cluster_end {
+            close(&mut cluster, lane_end.len(), &mut lanes_of);
+            lane_end.clear();
+        }
+        match lane_end.iter().position(|end| *end <= srow) {
+            Some(l) => {
+                lane_of[k] = l;
+                lane_end[l] = erow;
             }
-            if abs.is_multiple_of(rph) && abs > 0 {
-                let dots = "┈".repeat(cw as usize);
-                buf.set_string(
-                    x0,
-                    grid.y + r,
-                    dots,
-                    Style::new().fg(Color::Rgb(36, 45, 56)),
-                );
+            None => {
+                lane_of[k] = lane_end.len();
+                lane_end.push(erow);
             }
         }
-
-        // More hours above / below.
-        let more = Style::new().fg(Color::Indexed(250));
-        if offset > 0 {
-            buf.set_string(grid.x + LABEL_W, grid.y, "▲", more);
-        }
-        if offset < max_offset {
-            buf.set_string(grid.x + LABEL_W, grid.bottom() - 1, "▼", more);
-        }
-
-        // Lanes for overlapping events. Events are grouped into clusters that
-        // overlap each other; only a cluster is split into lanes, so an event
-        // that overlaps nothing keeps the full width. (Items are sorted by
-        // start, so a cluster ends where nothing running reaches the next.)
-        let mut lane_of = vec![0usize; spans_min.len()];
-        let mut lanes_of = vec![1usize; spans_min.len()];
-        let mut cluster: Vec<usize> = Vec::new();
-        let mut lane_end: Vec<u32> = Vec::new();
-        let mut cluster_end = 0u32;
-        let close = |cluster: &mut Vec<usize>, lanes: usize, lanes_of: &mut Vec<usize>| {
-            for k in cluster.drain(..) {
-                lanes_of[k] = lanes.max(1);
-            }
+        cluster_end = if cluster.is_empty() {
+            erow
+        } else {
+            cluster_end.max(erow)
         };
-        for (k, &(_, s, e)) in spans_min.iter().enumerate() {
-            let (srow, erow) = (row_of(s), row_of(e).max(row_of(s) + 1));
-            if !cluster.is_empty() && srow >= cluster_end {
-                close(&mut cluster, lane_end.len(), &mut lanes_of);
-                lane_end.clear();
-            }
-            match lane_end.iter().position(|end| *end <= srow) {
-                Some(l) => {
-                    lane_of[k] = l;
-                    lane_end[l] = erow;
-                }
-                None => {
-                    lane_of[k] = lane_end.len();
-                    lane_end.push(erow);
-                }
-            }
-            cluster_end = if cluster.is_empty() {
-                erow
-            } else {
-                cluster_end.max(erow)
-            };
-            cluster.push(k);
-        }
-        close(&mut cluster, lane_end.len(), &mut lanes_of);
-        let mut occupied = vec![vec![false; cw as usize]; grid.height as usize];
+        cluster.push(k);
+    }
+    close(&mut cluster, lane_end.len(), &mut lanes_of);
+    (lane_of, lanes_of)
+}
 
-        for (k, &(idx, s, e)) in spans_min.iter().enumerate() {
-            let inst = &app.day_items[idx];
-            let selected = idx == app.appt_sel;
-            let (srow, erow) = (row_of(s), row_of(e).max(row_of(s) + 1));
-            let lanes = lanes_of[k] as u16;
-            let lane_w = (cw / lanes).max(4);
-            let x = x0 + lane_of[k] as u16 * lane_w;
-            let w = if lane_of[k] as u16 + 1 == lanes {
-                x0 + cw - x
-            } else {
-                lane_w - 1
+/// One column of event blocks: a day's items drawn into `x..x + width`.
+struct Column<'a> {
+    items: &'a [Instance],
+    /// (index into `items`, start minute, end minute) of the timed items.
+    spans: &'a [(usize, u32, u32)],
+    x: u16,
+    width: u16,
+    /// Index of the selected item, if it is in this column.
+    selected: Option<usize>,
+    /// Items ending at or before this are dimmed as past.
+    past_before: Option<chrono::DateTime<chrono_tz::Tz>>,
+    /// Narrow week column: title, then times, on their own rows.
+    compact: bool,
+}
+
+/// Draw a column's timed items as blocks. Marks the cells they cover in
+/// `occupied` (indexed from the grid's top-left) and adds their hits.
+#[allow(clippy::too_many_arguments)]
+fn draw_blocks(
+    buf: &mut Buffer,
+    app: &App,
+    grid: Rect,
+    g: &HourGrid,
+    col: &Column,
+    sel_bg: Color,
+    occupied: &mut [Vec<bool>],
+    hits: &mut Vec<(Rect, Hit)>,
+    hit: impl Fn(usize) -> Hit,
+) {
+    let home = app.store.home;
+    let (lane_of, lanes_of) = lanes(col.spans, g);
+    // Lanes are at least 4 cells; in a narrow column, extra lanes share the
+    // last one rather than spill out of it.
+    let max_lanes = (col.width / 4).max(1) as usize;
+    for (k, &(idx, s, e)) in col.spans.iter().enumerate() {
+        let inst = &col.items[idx];
+        let selected = col.selected == Some(idx);
+        let (srow, erow) = (g.row_of(s), g.row_of(e).max(g.row_of(s) + 1));
+        let lanes = lanes_of[k].min(max_lanes) as u16;
+        let lane = lane_of[k].min(lanes as usize - 1) as u16;
+        let lane_w = (col.width / lanes).max(4);
+        let x = col.x + lane * lane_w;
+        let w = if lane + 1 == lanes {
+            col.x + col.width - x
+        } else {
+            lane_w - 1
+        };
+        let start = inst.start.instant(home);
+        let end = inst.end.instant(home);
+        let past = col.past_before.is_some_and(|now| end <= now);
+        let (title, rest) = split_title(app, inst);
+        let bg = if selected { sel_bg } else { BLOCK_BG };
+        let text_fg = if past {
+            Color::Indexed(244)
+        } else {
+            Color::Reset
+        };
+        let times = format!("{}–{}", start.format("%H:%M"), end.format("%H:%M"));
+        let bold = Style::new().fg(text_fg).add_modifier(Modifier::BOLD);
+        for (n, abs) in (srow..erow).enumerate() {
+            let Some(r) = g.visible(abs, grid.height) else {
+                continue;
             };
-            let start = inst.start.instant(home);
-            let end = inst.end.instant(home);
-            let past = is_today && end <= now;
-            let (title, rest) = split_title(app, inst);
-            let bg = if selected { sel_bg } else { BLOCK_BG };
-            let text_fg = if past {
-                Color::Indexed(244)
+            let ry = grid.y + r;
+            let mut spans = vec![Span::styled("▌", cal_style(app, inst.calendar))];
+            let room = (w as usize).saturating_sub(1);
+            if col.compact {
+                match n {
+                    0 => spans.push(Span::styled(ellipsize(&title, room), bold)),
+                    1 => {
+                        // The whole range, the start, or nothing: never a
+                        // clipped time.
+                        let t = if times.chars().count() <= room {
+                            times.clone()
+                        } else if room >= 5 {
+                            start.format("%H:%M").to_string()
+                        } else {
+                            String::new()
+                        };
+                        spans.push(Span::raw(t).fg(Color::Indexed(246)));
+                    }
+                    2 if w >= 18 => spans.extend(details(app, inst, &rest)),
+                    _ => {}
+                }
             } else {
-                Color::Reset
-            };
-            let times = format!("{}–{}", start.format("%H:%M"), end.format("%H:%M"));
-            for (n, abs) in (srow..erow).enumerate() {
-                let Some(r) = abs.checked_sub(offset).filter(|r| *r < grid.height as u32) else {
-                    continue;
-                };
-                let ry = grid.y + r as u16;
-                let mut spans = vec![Span::styled("▌", cal_style(app, inst.calendar))];
                 match n {
                     0 => {
-                        spans.push(Span::styled(
-                            format!(" {title}"),
-                            Style::new().fg(text_fg).add_modifier(Modifier::BOLD),
-                        ));
+                        spans.push(Span::styled(format!(" {title}"), bold));
                         spans.push(Span::raw(format!("  {times}")).fg(Color::Indexed(246)));
                         if erow - srow == 1 {
                             spans.push(Span::raw("  "));
@@ -674,42 +840,248 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
                     }
                     _ => {}
                 }
-                if past {
-                    for sp in spans.iter_mut().skip(1) {
-                        sp.style = sp.style.fg(Color::Indexed(244));
-                    }
+            }
+            if past {
+                for sp in spans.iter_mut().skip(1) {
+                    sp.style = sp.style.fg(Color::Indexed(244));
                 }
-                put(buf, x, ry, w, Line::from(spans), Some(bg));
-                for c in (x - x0)..(x - x0 + w) {
-                    if let Some(cell) = occupied[r as usize].get_mut(c as usize) {
-                        *cell = true;
-                    }
+            }
+            put(buf, x, ry, w, Line::from(spans), Some(bg));
+            for c in (x - grid.x)..(x - grid.x + w) {
+                if let Some(cell) = occupied[r as usize].get_mut(c as usize) {
+                    *cell = true;
                 }
-                hits.push((Rect::new(x, ry, w, 1), Hit::Appointment(idx)));
+            }
+            hits.push((Rect::new(x, ry, w, 1), hit(idx)));
+        }
+    }
+}
+
+/// The "now" line through the free cells of `x0..x0 + cw`, and the time in
+/// the label margin.
+#[allow(clippy::too_many_arguments)]
+fn draw_now_line(
+    buf: &mut Buffer,
+    grid: Rect,
+    g: &HourGrid,
+    now_min: u32,
+    now: chrono::DateTime<chrono_tz::Tz>,
+    x0: u16,
+    cw: u16,
+    occupied: &[Vec<bool>],
+) {
+    let Some(r) = g.visible(g.row_of(now_min), grid.height) else {
+        return;
+    };
+    let ry = grid.y + r;
+    let accent = Style::new().fg(NOW);
+    buf.set_string(
+        grid.x,
+        ry,
+        format!(" {:<5}", now.format("%H:%M")),
+        accent.bold(),
+    );
+    buf.set_string(grid.x + LABEL_W, ry, "┼", accent);
+    for x in x0..x0 + cw {
+        if !occupied[r as usize][(x - grid.x) as usize] {
+            buf.set_string(x, ry, "─", accent);
+        }
+    }
+}
+
+/// The appointments panel in week view: Monday to Sunday of the selected
+/// day's week as columns on one hour grid. The selected day's column is
+/// highlighted; its items are the ones `j`/`k`, edit and delete act on.
+fn draw_week(f: &mut Frame, app: &mut App, area: Rect) {
+    let today = app.today();
+    let monday = week_start(app.date);
+    let sunday = monday + Duration::days(6);
+    let range = if monday.month() == sunday.month() {
+        format!("{}–{}", monday.day(), sunday.format("%-d %B"))
+    } else {
+        format!("{} – {}", monday.format("%-d %b"), sunday.format("%-d %b"))
+    };
+    let mut title = format!("Week {} · {range}", monday.iso_week().week());
+    if (monday..=sunday).contains(&today) {
+        title.push_str(" · this week");
+    } else if monday.year() != today.year() {
+        title.push_str(&format!(" {}", sunday.year()));
+    }
+    let inner = panel_frame(f, app, PanelKind::Appointments, &title, area, false);
+    if inner.height < 3 {
+        return;
+    }
+
+    let focused = app.focus == PanelKind::Appointments;
+    let now = app.now();
+    let sel_bg = if focused {
+        Color::Indexed(24)
+    } else {
+        Color::Indexed(238)
+    };
+    let label = Style::new().fg(Color::Indexed(244));
+    let sep = Style::new().fg(Color::Indexed(238));
+    let mut hits: Vec<(Rect, Hit)> = Vec::new();
+    let buf = f.buffer_mut();
+
+    // Day columns: x and width (without the separator after it).
+    let x0 = inner.x + LABEL_W + 1;
+    let avail = inner.width.saturating_sub(LABEL_W + 1);
+    let col_x = |n: u16| x0 + n * avail / 7;
+    let cols: Vec<(u16, u16)> = (0..7)
+        .map(|n| {
+            let x = col_x(n);
+            let w = if n == 6 {
+                x0 + avail - x
+            } else {
+                col_x(n + 1) - x - 1
+            };
+            (x, w)
+        })
+        .collect();
+    let days: Vec<(NaiveDate, &[Instance])> = (0..7)
+        .map(|n| {
+            let d = monday + Duration::days(n);
+            let items = app
+                .week_items
+                .iter()
+                .find(|(day, _)| *day == d)
+                .map(|(_, v)| v.as_slice())
+                .unwrap_or(&[]);
+            (d, items)
+        })
+        .collect();
+    let parts: Vec<(Vec<usize>, Vec<usize>)> = days
+        .iter()
+        .map(|(d, items)| split_all_day(app, items, *d))
+        .collect();
+
+    // Header: "Mo 16" per column; today as a pill in the "now" red, the
+    // selected day on the selection colour.
+    let y = inner.y;
+    for (n, &(x, w)) in cols.iter().enumerate() {
+        let d = days[n].0;
+        let text = format!(" {} {:>2}", &d.format("%a").to_string()[..2], d.day());
+        let mut around = Style::new().fg(Color::Indexed(250));
+        if d == app.date {
+            around = around.bg(sel_bg).add_modifier(Modifier::BOLD);
+            buf.set_style(Rect::new(x, y, w, 1), around);
+        }
+        let style = if d == today {
+            Style::new()
+                .bg(NOW)
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            around
+        };
+        buf.set_string(x, y, ellipsize(&format!("{text} "), w as usize), style);
+        hits.push((Rect::new(x, y, w, 1), Hit::WeekDay(d)));
+    }
+
+    // All-day items and due todos: up to two rows; a full column says how
+    // many more it has.
+    let most = parts.iter().map(|(a, _)| a.len()).max().unwrap_or(0);
+    let rows = most.min(2) as u16;
+    for r in 0..rows {
+        let ry = inner.y + 1 + r;
+        if r == 0 {
+            buf.set_string(inner.x, ry, " all", label);
+        }
+        for (n, &(x, w)) in cols.iter().enumerate() {
+            let (d, items) = days[n];
+            let all = &parts[n].0;
+            let r = r as usize;
+            if all.len() > rows as usize && r + 1 == rows as usize {
+                let more = format!(" +{}", all.len() - r);
+                buf.set_string(x, ry, ellipsize(&more, w as usize), label);
+                hits.push((Rect::new(x, ry, w, 1), Hit::WeekDay(d)));
+                continue;
+            }
+            let Some(&idx) = all.get(r) else { continue };
+            let inst = &items[idx];
+            let selected = d == app.date && idx == app.appt_sel;
+            let (title, _) = split_title(app, inst);
+            let line = Line::from(vec![
+                Span::styled("▌", cal_style(app, inst.calendar)),
+                Span::raw(ellipsize(&title, (w as usize).saturating_sub(1))),
+            ]);
+            let bg = if selected { sel_bg } else { BLOCK_BG };
+            put(buf, x, ry, w, line, Some(bg));
+            hits.push((Rect::new(x, ry, w, 1), Hit::WeekItem(d, idx)));
+        }
+    }
+
+    // The hour grid.
+    let top = inner.y + 1 + rows;
+    let grid = Rect::new(
+        inner.x,
+        top,
+        inner.width,
+        inner.bottom().saturating_sub(top),
+    );
+    let mut day_view = (0u32, 1u32, 0u32);
+    if grid.height >= 2 {
+        let spans: Vec<Vec<(usize, u32, u32)>> = days
+            .iter()
+            .zip(&parts)
+            .map(|((d, items), (_, timed))| timed_spans(app, items, timed, *d))
+            .collect();
+        let sel_n = days.iter().position(|(d, _)| *d == app.date);
+        let selected = sel_n.and_then(|n| {
+            spans[n]
+                .iter()
+                .find(|(i, _, _)| *i == app.appt_sel)
+                .map(|(_, s, _)| *s)
+        });
+        let today_n = days.iter().position(|(d, _)| *d == today);
+        let now_min = today_n.map(|_| day_minute(app, today, now));
+        let g = HourGrid::new(
+            app,
+            grid.height,
+            spans.iter().flatten().map(|&(_, s, e)| (s, e)),
+            selected,
+            now_min,
+        );
+        day_view = (g.offset, g.rph, g.max_offset);
+        draw_hour_axis(buf, grid, &g, x0, avail);
+
+        // Column separators, from the header down.
+        for &(x, w) in &cols[..6] {
+            for ry in inner.y..grid.bottom() {
+                buf.set_string(x + w, ry, "│", sep);
             }
         }
 
-        // The "now" line through the free space, and the time in the margin.
-        if let Some(n) = now_min {
-            if let Some(r) = row_of(n)
-                .checked_sub(offset)
-                .filter(|r| *r < grid.height as u32)
-            {
-                let ry = grid.y + r as u16;
-                let accent = Style::new().fg(NOW);
-                buf.set_string(
-                    grid.x,
-                    ry,
-                    format!(" {:<5}", now.format("%H:%M")),
-                    accent.bold(),
-                );
-                buf.set_string(grid.x + LABEL_W, ry, "┼", accent);
-                for c in 0..cw {
-                    if !occupied[r as usize][c as usize] {
-                        buf.set_string(x0 + c, ry, "─", accent);
-                    }
-                }
-            }
+        let mut occupied = vec![vec![false; grid.width as usize]; grid.height as usize];
+        for (n, &(x, w)) in cols.iter().enumerate() {
+            let (d, items) = days[n];
+            // Free space in a column selects that day.
+            hits.push((Rect::new(x, grid.y, w, grid.height), Hit::WeekDay(d)));
+            let col = Column {
+                items,
+                spans: &spans[n],
+                x,
+                width: w,
+                selected: (d == app.date).then_some(app.appt_sel),
+                past_before: Some(now),
+                compact: true,
+            };
+            draw_blocks(
+                buf,
+                app,
+                grid,
+                &g,
+                &col,
+                sel_bg,
+                &mut occupied,
+                &mut hits,
+                |i| Hit::WeekItem(d, i),
+            );
+        }
+        if let (Some(n), Some(m)) = (today_n, now_min) {
+            let (x, w) = cols[n];
+            draw_now_line(buf, grid, &g, m, now, x, w, &occupied);
         }
     }
     app.hits.extend(hits);
@@ -717,14 +1089,7 @@ fn draw_appointments(f: &mut Frame, app: &mut App, area: Rect) {
 }
 
 fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
-    let title = match app.cal_view {
-        CalView::Month => app.date.format("%B %Y").to_string(),
-        CalView::Week => format!(
-            "Week {} · {}",
-            app.date.iso_week().week(),
-            app.date.format("%b %Y")
-        ),
-    };
+    let title = app.date.format("%B %Y").to_string();
     // ‹ title › with clickable arrows (the title row is centred the same
     // way panel_frame centres it).
     let title = format!("‹  {title}  ›");
@@ -740,272 +1105,229 @@ fn draw_calendar(f: &mut Frame, app: &mut App, area: Rect) {
 
     let today = app.today();
     let focused = app.focus == PanelKind::Calendar;
-    let day_style = |d: NaiveDate| {
-        let mut s = match app.marks.get(&d).and_then(|c| c.first()) {
-            Some(cal) => cal_style(app, *cal).bold(),
-            None => Style::new(),
-        };
-        if d == today {
-            s = s.add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
-        }
-        if d == app.date {
-            s = if focused {
-                s.bg(Color::Indexed(24)).add_modifier(Modifier::BOLD)
-            } else {
-                s.bg(Color::Indexed(236))
-            };
-        }
-        s
-    };
 
     let mut hits: Vec<(Rect, Hit)> = Vec::new();
     let row_rect = |idx: usize| {
         (idx < inner.height as usize)
             .then(|| Rect::new(inner.x, inner.y + idx as u16, inner.width, 1))
     };
-    let lines: Vec<Line> = match app.cal_view {
-        CalView::Month => {
-            let (start, _) = app.visible_range();
-            let home = app.store.home;
-            // Week-number column, then seven day cells centred in the panel:
-            // 5 wide (room for two calendar dots), 4 (one dot), or 3 if tight.
-            let cw: usize = (inner.width.saturating_sub(3) as usize / 7).clamp(3, 5);
-            let grid_w = 3 + 7 * cw;
-            let pad = " ".repeat((inner.width as usize).saturating_sub(grid_w) / 2);
-            let label = Style::new().fg(Color::Indexed(244));
-            let dim = Style::new().fg(Color::Indexed(240));
-            let day_cell = |d: NaiveDate| -> Vec<Span<'static>> {
-                let other_month = d.month() != app.date.month();
-                // Numbers stay in the normal text colour; the dots carry the
-                // calendar colours.
-                let mut text = if other_month { dim } else { Style::new() };
-                let mut around = Style::new();
-                if d == app.date {
-                    let bg = if focused {
-                        Color::Indexed(24)
-                    } else {
-                        Color::Indexed(236)
-                    };
-                    around = around.bg(bg);
-                    text = text.bg(bg).add_modifier(Modifier::BOLD);
-                }
-                // Today: a filled pill in the "now" red, the same colour as the
-                // now line in the day view (wins over the selection colour).
-                let pill = if d == today {
-                    Style::new()
-                        .bg(NOW)
-                        .fg(Color::Black)
-                        .add_modifier(Modifier::BOLD)
+    let lines: Vec<Line> = {
+        let (start, _) = app.visible_range();
+        let home = app.store.home;
+        // Week-number column, then seven day cells centred in the panel:
+        // 5 wide (room for two calendar dots), 4 (one dot), or 3 if tight.
+        let cw: usize = (inner.width.saturating_sub(3) as usize / 7).clamp(3, 5);
+        let grid_w = 3 + 7 * cw;
+        let pad = " ".repeat((inner.width as usize).saturating_sub(grid_w) / 2);
+        let label = Style::new().fg(Color::Indexed(244));
+        let dim = Style::new().fg(Color::Indexed(240));
+        let day_cell = |d: NaiveDate| -> Vec<Span<'static>> {
+            let other_month = d.month() != app.date.month();
+            // Numbers stay in the normal text colour; the dots carry the
+            // calendar colours.
+            let mut text = if other_month { dim } else { Style::new() };
+            let mut around = Style::new();
+            if d == app.date {
+                let bg = if focused {
+                    Color::Indexed(24)
                 } else {
-                    around
+                    Color::Indexed(236)
                 };
-                if d == today {
-                    text = pill;
-                }
-                let mut cell = vec![
-                    Span::styled(" ", pill),
-                    Span::styled(format!("{:>2}", d.day()), text),
-                ];
-                // One dot per calendar with items that day, as many as fit.
-                let slots = cw - 3;
-                let cals = app.marks.get(&d).map(Vec::as_slice).unwrap_or(&[]);
-                for i in 0..slots {
-                    cell.push(match cals.get(i) {
-                        Some(cal) => {
-                            let c = if other_month {
-                                Color::Indexed(240)
-                            } else {
-                                cal_color(app, *cal)
-                            };
-                            Span::styled("•", around.fg(c))
-                        }
-                        None => Span::styled(" ", around),
-                    });
-                }
-                cell
+                around = around.bg(bg);
+                text = text.bg(bg).add_modifier(Modifier::BOLD);
+            }
+            // Today: a filled pill in the "now" red, the same colour as the
+            // now line in the day view (wins over the selection colour).
+            let pill = if d == today {
+                Style::new()
+                    .bg(NOW)
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                around
             };
-
-            let mut header = vec![Span::raw(pad.clone()), Span::styled(" v ", label)];
-            for name in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] {
-                header.push(Span::styled(
-                    format!(" {name}{}", " ".repeat(cw - 3)),
-                    label,
-                ));
+            if d == today {
+                text = pill;
             }
-            let mut lines = vec![Line::from(header)];
-            for week in 0..6 {
-                let monday = start + Duration::days(week * 7);
-                let mut spans = vec![
-                    Span::raw(pad.clone()),
-                    Span::styled(
-                        format!("{:>2} ", monday.iso_week().week()),
-                        // The current week's number in the "now" colour.
-                        if (monday..monday + Duration::days(7)).contains(&today) {
-                            Style::new().fg(NOW).add_modifier(Modifier::BOLD)
+            let mut cell = vec![
+                Span::styled(" ", pill),
+                Span::styled(format!("{:>2}", d.day()), text),
+            ];
+            // One dot per calendar with items that day, as many as fit.
+            let slots = cw - 3;
+            let cals = app.marks.get(&d).map(Vec::as_slice).unwrap_or(&[]);
+            for i in 0..slots {
+                cell.push(match cals.get(i) {
+                    Some(cal) => {
+                        let c = if other_month {
+                            Color::Indexed(240)
                         } else {
-                            label
-                        },
-                    ),
-                ];
-                let y = 1 + week as usize;
-                for wd in 0..7 {
-                    if let Some(r) = row_rect(y) {
-                        let x = inner.x + (pad.len() + 3 + wd as usize * cw) as u16;
-                        let w = (cw as u16).min(inner.right().saturating_sub(x));
-                        hits.push((
-                            Rect::new(x, r.y, w, 1),
-                            Hit::Day(monday + Duration::days(wd)),
-                        ));
+                            cal_color(app, *cal)
+                        };
+                        Span::styled("•", around.fg(c))
                     }
-                    spans.extend(day_cell(monday + Duration::days(wd)));
-                }
-                lines.push(Line::from(spans));
+                    None => Span::styled(" ", around),
+                });
             }
+            cell
+        };
 
-            // Below the grid: what comes after the selected day. Day headers
-            // on their own line, items as "13:15 Title" with the time in the
-            // calendar's colour, so titles get most of the width.
-            let room = (inner.height as usize).saturating_sub(lines.len());
-            if room >= 3 {
-                // Week separators double as labels: "── This week ───".
-                let monday =
-                    |d: NaiveDate| d - Duration::days(d.weekday().num_days_from_monday() as i64);
-                let this_week = monday(today);
-                let rule = |week: NaiveDate| {
-                    let name = if week == this_week {
-                        "This week".to_string()
-                    } else if week == this_week + Duration::days(7) {
-                        "Next week".to_string()
-                    } else if week == this_week - Duration::days(7) {
-                        "Last week".to_string()
+        let mut header = vec![Span::raw(pad.clone()), Span::styled(" v ", label)];
+        for name in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"] {
+            header.push(Span::styled(
+                format!(" {name}{}", " ".repeat(cw - 3)),
+                label,
+            ));
+        }
+        let mut lines = vec![Line::from(header)];
+        for week in 0..6 {
+            let monday = start + Duration::days(week * 7);
+            let mut spans = vec![
+                Span::raw(pad.clone()),
+                Span::styled(
+                    format!("{:>2} ", monday.iso_week().week()),
+                    // The current week's number in the "now" colour.
+                    if (monday..monday + Duration::days(7)).contains(&today) {
+                        Style::new().fg(NOW).add_modifier(Modifier::BOLD)
                     } else {
-                        format!("Week {}", week.iso_week().week())
-                    };
-                    let text = format!(" ── {name} ");
-                    let fill = (inner.width as usize).saturating_sub(text.chars().count() + 1);
-                    Line::from(format!("{text}{}", "─".repeat(fill))).style(dim)
-                };
-                let from = app.date + Duration::days(1);
-                if app.upcoming.is_empty() {
-                    lines.push(rule(monday(from)));
-                    lines.push(Line::from(" nothing in the next two weeks").style(dim));
+                        label
+                    },
+                ),
+            ];
+            let y = 1 + week as usize;
+            for wd in 0..7 {
+                if let Some(r) = row_rect(y) {
+                    let x = inner.x + (pad.len() + 3 + wd as usize * cw) as u16;
+                    let w = (cw as u16).min(inner.right().saturating_sub(x));
+                    hits.push((
+                        Rect::new(x, r.y, w, 1),
+                        Hit::Day(monday + Duration::days(wd)),
+                    ));
                 }
-                // Lines the whole list needs (week rules, day headers, items); if
-                // it does not fit, keep the last line for "N more".
-                let needed_total = {
-                    let (mut n, mut ld, mut lw) = (0, None, None);
-                    for i in &app.upcoming {
-                        let day = i.start.date_in(home).max(from);
-                        if ld != Some(day) {
-                            if lw != Some(monday(day)) {
-                                n += 1;
-                                lw = Some(monday(day));
-                            }
-                            n += 1;
-                            ld = Some(day);
-                        }
-                        n += 1;
-                    }
-                    n
-                };
-                let limit = if lines.len() + needed_total > inner.height as usize {
-                    (inner.height as usize).saturating_sub(1)
+                spans.extend(day_cell(monday + Duration::days(wd)));
+            }
+            lines.push(Line::from(spans));
+        }
+
+        // Below the grid: what comes after the selected day. Day headers
+        // on their own line, items as "13:15 Title" with the time in the
+        // calendar's colour, so titles get most of the width.
+        let room = (inner.height as usize).saturating_sub(lines.len());
+        if room >= 3 {
+            // Week separators double as labels: "── This week ───".
+            let monday =
+                |d: NaiveDate| d - Duration::days(d.weekday().num_days_from_monday() as i64);
+            let this_week = monday(today);
+            let rule = |week: NaiveDate| {
+                let name = if week == this_week {
+                    "This week".to_string()
+                } else if week == this_week + Duration::days(7) {
+                    "Next week".to_string()
+                } else if week == this_week - Duration::days(7) {
+                    "Last week".to_string()
                 } else {
-                    inner.height as usize
+                    format!("Week {}", week.iso_week().week())
                 };
-                let mut shown = 0;
-                let title_w = (inner.width as usize).saturating_sub(9);
-                let mut last_day = None;
-                let mut last_week = None;
+                let text = format!(" ── {name} ");
+                let fill = (inner.width as usize).saturating_sub(text.chars().count() + 1);
+                Line::from(format!("{text}{}", "─".repeat(fill))).style(dim)
+            };
+            let from = app.date + Duration::days(1);
+            if app.upcoming.is_empty() {
+                lines.push(rule(monday(from)));
+                lines.push(Line::from(" nothing in the next two weeks").style(dim));
+            }
+            // Lines the whole list needs (week rules, day headers, items); if
+            // it does not fit, keep the last line for "N more".
+            let needed_total = {
+                let (mut n, mut ld, mut lw) = (0, None, None);
                 for i in &app.upcoming {
                     let day = i.start.date_in(home).max(from);
-                    if last_day != Some(day) {
-                        let new_week = last_week != Some(monday(day));
-                        // Only start a day if one item fits under its header.
-                        let needed = if new_week { 3 } else { 2 };
-                        if lines.len() + needed > limit {
-                            break;
+                    if ld != Some(day) {
+                        if lw != Some(monday(day)) {
+                            n += 1;
+                            lw = Some(monday(day));
                         }
-                        if new_week {
-                            last_week = Some(monday(day));
-                            lines.push(rule(monday(day)));
-                        }
-                        last_day = Some(day);
-                        if let Some(r) = row_rect(lines.len()) {
-                            hits.push((r, Hit::AgendaDay(day)));
-                        }
-                        let when = if day == today + Duration::days(1) {
-                            day.format(" Tomorrow · %a %-d %b").to_string()
-                        } else {
-                            day.format(" %A %-d %b").to_string()
-                        };
-                        lines.push(Line::from(when).style(label.add_modifier(Modifier::BOLD)));
+                        n += 1;
+                        ld = Some(day);
                     }
-                    if lines.len() >= limit {
+                    n += 1;
+                }
+                n
+            };
+            let limit = if lines.len() + needed_total > inner.height as usize {
+                (inner.height as usize).saturating_sub(1)
+            } else {
+                inner.height as usize
+            };
+            let mut shown = 0;
+            let title_w = (inner.width as usize).saturating_sub(9);
+            let mut last_day = None;
+            let mut last_week = None;
+            for i in &app.upcoming {
+                let day = i.start.date_in(home).max(from);
+                if last_day != Some(day) {
+                    let new_week = last_week != Some(monday(day));
+                    // Only start a day if one item fits under its header.
+                    let needed = if new_week { 3 } else { 2 };
+                    if lines.len() + needed > limit {
                         break;
                     }
+                    if new_week {
+                        last_week = Some(monday(day));
+                        lines.push(rule(monday(day)));
+                    }
+                    last_day = Some(day);
                     if let Some(r) = row_rect(lines.len()) {
                         hits.push((r, Hit::AgendaDay(day)));
                     }
-                    let colour = cal_style(app, i.calendar);
-                    let (when, title_style) = if i.kind == Kind::Todo {
-                        ("due  ".to_string(), Style::new())
-                    } else if i.all_day {
-                        // No time: the title itself carries the colour.
-                        ("     ".to_string(), colour)
+                    let when = if day == today + Duration::days(1) {
+                        day.format(" Tomorrow · %a %-d %b").to_string()
                     } else {
-                        (
-                            i.start.instant(home).format("%H:%M").to_string(),
-                            Style::new(),
-                        )
+                        day.format(" %A %-d %b").to_string()
                     };
-                    lines.push(Line::from(vec![
-                        Span::raw("  "),
-                        Span::styled(when, colour),
-                        Span::raw(" "),
-                        Span::styled(ellipsize(&split_title(app, i).0, title_w), title_style),
-                    ]));
-                    shown += 1;
+                    lines.push(Line::from(when).style(label.add_modifier(Modifier::BOLD)));
                 }
-                // What did not fit: how many, from which day (click to go there).
-                if let Some(next) = app.upcoming.get(shown) {
-                    let hidden = app.upcoming.len() - shown;
-                    let day = next.start.date_in(home).max(from);
-                    if let Some(r) = row_rect(lines.len()) {
-                        hits.push((r, Hit::AgendaDay(day)));
-                    }
-                    lines.push(
-                        Line::from(format!(" ⋯ {hidden} more from {}", day.format("%A %-d %b")))
-                            .style(Style::new().fg(MUTED).add_modifier(Modifier::ITALIC)),
-                    );
-                }
-            }
-            lines
-        }
-        CalView::Week => {
-            let (start, _) = app.visible_range();
-            let gap = inner.height >= 7 * 2 - 1;
-            let mut lines = Vec::new();
-            for n in 0..7 {
-                if gap && n > 0 {
-                    lines.push(Line::from(""));
-                }
-                let d = start + Duration::days(n);
-                let mut spans = vec![
-                    Span::raw(" "),
-                    Span::styled(format!(" {} ", d.format("%a %d")), day_style(d)),
-                    Span::raw(" "),
-                ];
-                for cal in app.marks.get(&d).into_iter().flatten().take(6) {
-                    spans.push(Span::styled("● ", cal_style(app, *cal)));
+                if lines.len() >= limit {
+                    break;
                 }
                 if let Some(r) = row_rect(lines.len()) {
-                    hits.push((r, Hit::Day(d)));
+                    hits.push((r, Hit::AgendaDay(day)));
                 }
-                lines.push(Line::from(spans));
+                let colour = cal_style(app, i.calendar);
+                let (when, title_style) = if i.kind == Kind::Todo {
+                    ("due  ".to_string(), Style::new())
+                } else if i.all_day {
+                    // No time: the title itself carries the colour.
+                    ("     ".to_string(), colour)
+                } else {
+                    (
+                        i.start.instant(home).format("%H:%M").to_string(),
+                        Style::new(),
+                    )
+                };
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(when, colour),
+                    Span::raw(" "),
+                    Span::styled(ellipsize(&split_title(app, i).0, title_w), title_style),
+                ]));
+                shown += 1;
             }
-            lines
+            // What did not fit: how many, from which day (click to go there).
+            if let Some(next) = app.upcoming.get(shown) {
+                let hidden = app.upcoming.len() - shown;
+                let day = next.start.date_in(home).max(from);
+                if let Some(r) = row_rect(lines.len()) {
+                    hits.push((r, Hit::AgendaDay(day)));
+                }
+                lines.push(
+                    Line::from(format!(" ⋯ {hidden} more from {}", day.format("%A %-d %b")))
+                        .style(Style::new().fg(MUTED).add_modifier(Modifier::ITALIC)),
+                );
+            }
         }
+        lines
     };
     app.hits.extend(hits);
     f.render_widget(Paragraph::new(lines), inner);
@@ -1179,6 +1501,7 @@ fn draw_keys(f: &mut Frame, app: &App, area: Rect) {
             ("e", "Edit"),
             ("d", "Delete"),
             ("Enter", "View"),
+            ("V", "Week"),
             ("S", "Sync"),
             ("q", "Quit"),
         ],
@@ -1244,7 +1567,7 @@ fn draw_help(f: &mut Frame) {
         ("d", "delete the selected item"),
         ("x, Space", "todo: mark done / not done"),
         ("+ / -", "todo: raise / lower priority"),
-        ("v", "switch month / week view"),
+        ("V", "day / week view of the appointments"),
         ("c", "show / hide calendars"),
         ("C", "show / hide completed todos"),
         ("S", "sync (runs sync_command), then reload"),

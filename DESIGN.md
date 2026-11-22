@@ -8,8 +8,8 @@ iCalendar files (vdir) and synced to CalDAV through vdirsyncer.
 ## Goals
 
 - **A visual TUI for planning time.** It follows calcurse's look: an
-  appointments panel, a month/week calendar panel and a todo panel, with a
-  status bar and vim-style keys.
+  appointments panel (a day or its week), a month calendar panel and a todo
+  panel, with a status bar and vim-style keys.
 - **Quick shell commands** for use outside the TUI (`today`, `agenda`, `next`,
   `add`, `todo`), with `--json` output for scripts and status bars.
 - **Desktop notifications** from a background reminder service.
@@ -146,8 +146,14 @@ Default layout (classic, like calcurse):
  key hints
 ```
 
-- **Panels:** `appointments`, `calendar` (monthly or weekly), `todo`.
-  `agenda` and `week` panels may come later.
+- **Panels:** `appointments` (a day, or its week with `V`), `calendar`
+  (the month), `todo`. An `agenda` panel may come later.
+- **Week view of the appointments** (`V`): Monday to Sunday as seven columns
+  on one hour grid, with all-day items (up to two rows, then `+N`) above it.
+  The selected day stays the selected *day*: its column is highlighted and
+  `j`/`k`, edit and delete act on its items; `h`/`l` move the selection
+  across the week. Clicking another column's item selects that day and item.
+  Below 63 columns the panel falls back to the day and says "no room for week" in its title.
 - **Calendar colours** are used for items and for the day markers in the grid.
   Read-only items are dimmed or marked and cannot be edited.
 - **Notes:** the description is opened in `$EDITOR`.
@@ -201,6 +207,7 @@ state file; the TUI says so when you try to save over a config-defined layout.
 | `a` / `e` / `d` | add / edit / delete (asks for the scope on repeating items) |
 | `g` / `t` | go to date / today |
 | `n` | edit note (description) in `$EDITOR` |
+| `V` | appointments: day / week view |
 | `c` | toggle calendar visibility |
 | `S` | run sync command, then reload |
 | `w` | layout mode (cycle presets, resize, swap, rotate, hide, save) |

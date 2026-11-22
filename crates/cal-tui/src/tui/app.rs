@@ -15,10 +15,17 @@ use super::layout::{Dir, Node, PanelKind};
 use cal_core::layout::{LayoutConfig, BUILTIN};
 use ratatui::layout::{Position, Rect};
 
+/// What the appointments panel shows: the selected day, or its whole week
+/// (Monday to Sunday) as seven columns on one hour grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CalView {
-    Month,
+pub enum ApptView {
+    Day,
     Week,
+}
+
+/// Monday of the week containing `d`.
+pub fn week_start(d: NaiveDate) -> NaiveDate {
+    d - Duration::days(d.weekday().num_days_from_monday() as i64)
 }
 
 /// An edit or delete waiting for the user to pick a scope or confirm.
@@ -61,6 +68,11 @@ pub enum Hit {
     /// A line of the agenda under the month grid.
     AgendaDay(NaiveDate),
     Appointment(usize),
+    /// An item in the appointments week grid: its day and index in that
+    /// day's items (the same order as `day_items` once that day is selected).
+    WeekItem(NaiveDate, usize),
+    /// Free space in, or the header of, a day column of the week grid.
+    WeekDay(NaiveDate),
     Todo(usize),
     /// The divider below (`Dir::Rows`) or right of (`Dir::Columns`) a panel.
     Divider(PanelKind, Dir),
@@ -78,7 +90,9 @@ impl Hit {
         match self {
             Hit::Panel(p) => Some(p),
             Hit::Day(_) | Hit::AgendaDay(_) | Hit::Prev | Hit::Next => Some(PanelKind::Calendar),
-            Hit::Appointment(_) => Some(PanelKind::Appointments),
+            Hit::Appointment(_) | Hit::WeekItem(..) | Hit::WeekDay(_) => {
+                Some(PanelKind::Appointments)
+            }
             Hit::Todo(_) => Some(PanelKind::Todo),
             Hit::Divider(p, _) => Some(p),
             Hit::Popup | Hit::CalendarToggle(_) => None,
@@ -102,7 +116,7 @@ pub struct App {
     pub toggled_off: BTreeSet<String>,
     pub date: NaiveDate,
     pub focus: PanelKind,
-    pub cal_view: CalView,
+    pub appt_view: ApptView,
     pub show_completed: bool,
     pub appt_sel: usize,
     pub todo_sel: usize,
@@ -137,6 +151,9 @@ pub struct App {
 
     // Derived data, rebuilt by `refresh`.
     pub day_items: Vec<Instance>,
+    /// In week view: each day of the selected week with its items (empty in
+    /// day view).
+    pub week_items: Vec<(NaiveDate, Vec<Instance>)>,
     /// Items in the two weeks after the selected day (calendar panel agenda).
     pub upcoming: Vec<Instance>,
     pub todos: Vec<Todo>,
@@ -175,7 +192,7 @@ impl App {
             toggled_off: BTreeSet::new(),
             date: today,
             focus: PanelKind::Appointments,
-            cal_view: CalView::Month,
+            appt_view: ApptView::Day,
             show_completed: false,
             appt_sel: 0,
             todo_sel: 0,
@@ -197,6 +214,7 @@ impl App {
             weather: None,
             now_override: None,
             day_items: Vec::new(),
+            week_items: Vec::new(),
             upcoming: Vec::new(),
             todos: Vec::new(),
             marks: BTreeMap::new(),
@@ -237,24 +255,29 @@ impl App {
 
     /// First and last day shown by the calendar panel.
     pub fn visible_range(&self) -> (NaiveDate, NaiveDate) {
-        match self.cal_view {
-            CalView::Month => {
-                let first = self.date.with_day(1).unwrap();
-                let start = first - Duration::days(first.weekday().num_days_from_monday() as i64);
-                (start, start + Duration::days(41))
-            }
-            CalView::Week => {
-                let start =
-                    self.date - Duration::days(self.date.weekday().num_days_from_monday() as i64);
-                (start, start + Duration::days(6))
-            }
-        }
+        // Six weeks from the Monday on or before the 1st.
+        let start = week_start(self.date.with_day(1).unwrap());
+        (start, start + Duration::days(41))
     }
 
     /// Recompute derived data after the date, visibility or store changed.
     pub fn refresh(&mut self) {
         let (items, mut warnings) = self.store.day(self.date);
         self.day_items = items;
+        self.week_items.clear();
+        if self.appt_view == ApptView::Week {
+            let monday = week_start(self.date);
+            for n in 0..7 {
+                let d = monday + Duration::days(n);
+                if d == self.date {
+                    self.week_items.push((d, self.day_items.clone()));
+                } else {
+                    let (items, w) = self.store.day(d);
+                    warnings.extend(w);
+                    self.week_items.push((d, items));
+                }
+            }
+        }
         let next = self.date + Duration::days(1);
         let (upcoming, w) = self.store.instances(
             self.store.day_start(next),
@@ -413,11 +436,12 @@ impl App {
                 })
             }
             KeyCode::Char('c') => self.popup = Some(Popup::Calendars { sel: 0 }),
-            KeyCode::Char('v') => {
-                self.cal_view = match self.cal_view {
-                    CalView::Month => CalView::Week,
-                    CalView::Week => CalView::Month,
+            KeyCode::Char('V') => {
+                self.appt_view = match self.appt_view {
+                    ApptView::Day => ApptView::Week,
+                    ApptView::Week => ApptView::Day,
                 };
+                self.day_scroll = None;
                 self.refresh();
             }
             KeyCode::Char('C') => {
@@ -791,6 +815,19 @@ impl App {
                     self.appt_sel = i;
                 }
             }
+            Hit::WeekItem(d, i) => {
+                if d == self.date {
+                    self.click(Some(Hit::Appointment(i)));
+                } else {
+                    self.set_date(d);
+                    self.focus = PanelKind::Appointments;
+                    self.appt_sel = i.min(self.day_items.len().saturating_sub(1));
+                }
+            }
+            Hit::WeekDay(d) => {
+                self.set_date(d);
+                self.focus = PanelKind::Appointments;
+            }
             Hit::Todo(i) => {
                 if self.focus == PanelKind::Todo && self.todo_sel == i {
                     self.popup = Some(Popup::Details);
@@ -803,10 +840,7 @@ impl App {
             Hit::Prev | Hit::Next => {
                 let dir = if hit == Hit::Prev { -1 } else { 1 };
                 self.focus = PanelKind::Calendar;
-                match self.cal_view {
-                    CalView::Month => self.shift_months(dir),
-                    CalView::Week => self.shift_days(7 * dir as i64),
-                }
+                self.shift_months(dir);
             }
             Hit::Divider(..) => {}
             Hit::Popup | Hit::CalendarToggle(_) => {}
@@ -824,10 +858,7 @@ impl App {
             return;
         }
         match hit.and_then(Hit::panel) {
-            Some(PanelKind::Calendar) => match self.cal_view {
-                CalView::Month => self.shift_months(dir),
-                CalView::Week => self.shift_days(7 * dir as i64),
-            },
+            Some(PanelKind::Calendar) => self.shift_months(dir),
             Some(PanelKind::Appointments) => self.scroll_day(dir),
             Some(PanelKind::Todo) => {
                 self.todo_sel = step(self.todo_sel, dir, self.todos.len());
